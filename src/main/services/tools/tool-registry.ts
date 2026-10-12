@@ -640,19 +640,25 @@ export class ToolRegistry {
       },
     });
 
-    // 21. generate_image
+    // 21. generate_image & huggingface_generate_image alias
+    const generateImageHandler = async ({ prompt }: { prompt?: string }) => {
+      if (!prompt) throw new Error('Image prompt required');
+      return {
+        success: true,
+        prompt,
+        imageUrl: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&nologo=true`,
+        timestamp: new Date().toISOString(),
+      };
+    };
     this.register({
       name: 'generate_image',
       description: 'Generate an AI image and render it in the Visual Hub overlay.',
-      execute: async ({ prompt }: { prompt?: string }) => {
-        if (!prompt) throw new Error('Image prompt required');
-        return {
-          success: true,
-          prompt,
-          imageUrl: `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=768&nologo=true`,
-          timestamp: new Date().toISOString(),
-        };
-      },
+      execute: generateImageHandler,
+    });
+    this.register({
+      name: 'huggingface_generate_image',
+      description: 'Generate an AI image using Hugging Face (or direct rendering).',
+      execute: generateImageHandler,
     });
 
     // 22. browser_navigate
