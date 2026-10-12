@@ -30,7 +30,7 @@ export const AppSettingsSchema = z.object({
   wakeWordEnabled: z.boolean().default(false),
   voiceProvider: z.enum(['browser', 'gemini_live', 'elevenlabs']).default('browser'),
   voiceAssistantMode: z.enum(['voice', 'expert']).default('voice'),
-  selectedPersona: z.string().default('despina-caring'),
+  selectedPersona: z.string().default('caring_companion'),
   customSystemPrompt: z.string().default(''),
   theme: z.enum(['cyberpunk-dark', 'cyberpunk-neon']).default('cyberpunk-dark'),
   soundEffectsEnabled: z.boolean().default(true),

@@ -316,7 +316,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     wakeWordEnabled: false,
     voiceProvider: 'browser',
     voiceAssistantMode: 'voice',
-    selectedPersona: 'despina-caring',
+    selectedPersona: 'caring_companion',
     customSystemPrompt: '',
     theme: 'akki',
     soundEffectsEnabled: true,

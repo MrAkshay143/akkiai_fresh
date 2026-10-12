@@ -81,7 +81,7 @@ export class AIService {
     const apiKey = (payload.options?.geminiApiKey as string) || settings?.geminiApiKey;
     const openRouterKey = (payload.options?.openRouterApiKey as string) || settings?.openRouterApiKey;
     const model = payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel || 'gemini-3.1-flash-lite';
-    const persona = settings?.selectedPersona || 'despina-caring';
+    const persona = settings?.selectedPersona || 'caring_companion';
 
     if (apiKey) this.geminiService.setApiKey(apiKey);
     if (openRouterKey) this.geminiService.setOpenRouterKey(openRouterKey);
