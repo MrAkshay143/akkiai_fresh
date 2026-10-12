@@ -519,10 +519,9 @@ function handleChatSend(state, id, params, hermesConfig) {
         PYTHONIOENCODING: 'utf-8',
         // Stream reasoning / tool steps / answer tokens live to the chat window
         AKKI_STREAM_EVENTS: '1',
-        STONIC_STREAM_EVENTS: '1',
         // Stable per-chat session id → Hermes resumes the same conversation
         // across turns (multi-turn memory) and manages the context window itself.
-        ...(sessionKey ? { AKKI_SESSION_ID: `akki-chat-${sessionKey}`, STONIC_SESSION_ID: `stonic-chat-${sessionKey}` } : {}),
+        ...(sessionKey ? { AKKI_SESSION_ID: `akki-chat-${sessionKey}` } : {}),
         // Run Chrome in headed (visible) mode so user can see it live
         AGENT_BROWSER_HEADED: '1',
         // Enable console logs streaming to stderr
@@ -532,11 +531,11 @@ function handleChatSend(state, id, params, hermesConfig) {
         // Akki bridge URL — Python uses this to ask Electron to lazy-launch
         // the bundled Chromium when the CDP port is not yet alive.
         ...(actualBridgePort
-          ? { AKKI_BRIDGE_URL: `http://127.0.0.1:${actualBridgePort}`, STONIC_BRIDGE_URL: `http://127.0.0.1:${actualBridgePort}` }
+          ? { AKKI_BRIDGE_URL: `http://127.0.0.1:${actualBridgePort}` }
           : {}),
         // Pass dynamic Akki Data path
         ...(hermesConfig.akkiDataDir
-          ? { AKKI_DATA_DIR: hermesConfig.akkiDataDir, STONIC_DATA_DIR: hermesConfig.akkiDataDir }
+          ? { AKKI_DATA_DIR: hermesConfig.akkiDataDir }
           : {}),
         // Pass bundled Chromium path so Python browser tools can find it
         ...(hermesConfig.bundledChromiumPath
@@ -741,11 +740,11 @@ function dispatchToWorker(seatId, task, hermesConfig) {
           // Akki bridge URL — Python uses this to ask Electron to lazy-launch
           // the bundled Chromium when the CDP port is not yet alive.
           ...(actualBridgePort
-            ? { AKKI_BRIDGE_URL: `http://127.0.0.1:${actualBridgePort}`, STONIC_BRIDGE_URL: `http://127.0.0.1:${actualBridgePort}` }
+            ? { AKKI_BRIDGE_URL: `http://127.0.0.1:${actualBridgePort}` }
             : {}),
           // Pass dynamic Akki Data path
           ...(hermesConfig.akkiDataDir
-            ? { AKKI_DATA_DIR: hermesConfig.akkiDataDir, STONIC_DATA_DIR: hermesConfig.akkiDataDir }
+            ? { AKKI_DATA_DIR: hermesConfig.akkiDataDir }
             : {}),
           // Pass bundled Chromium path so Python browser tools can find it
           ...(hermesConfig.bundledChromiumPath

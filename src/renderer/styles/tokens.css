@@ -7,7 +7,7 @@
   --foreground: 225 248 255;
   --j-cyan: #00e5ff;
   --j-blue: #0085ff;
-  --j-void: #020406;
+  --j-void: #000000;
   --j-panel: #0b141b;
   --j-surface: #111e28;
   --j-steel: #1e2d38;
@@ -58,7 +58,7 @@
   --j-blue: #0085ff;
   --j-panel: #0b141b;
   --j-surface: #111e28;
-  --j-void: #020406;
+  --j-void: #000000;
   --j-steel: #1e2d38;
 }
 
@@ -152,7 +152,7 @@ body {
   height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: #020406;
+  background: #000000;
 }
 ::-webkit-scrollbar-thumb {
   background: #1e2d38;

@@ -15,6 +15,8 @@ try {
 
 import { ensureAkkiDirectories } from './services/storage/paths';
 import { createMainWindow, getMainWindow } from './windows/main-window';
+import { showLicenseBlocked, createOnboardingWindow } from './windows/onboarding-window';
+import { isLicenseBlocked } from './services/license/license-manager';
 import { InfoPanelWindowManager } from './windows/info-panel-window';
 import { LocalStore } from './services/storage/local-store';
 import { MemoryService } from './services/memory/memory-service';
@@ -230,7 +232,12 @@ if (!gotTheLock) {
       skillsService,
     });
 
-    // 4. Initialize Primary Electron Window
+    // 4. Initialize Primary Electron Window or License Blocked
+    if (isLicenseBlocked()) {
+      showLicenseBlocked();
+      return;
+    }
+
     createMainWindow();
     setupAutoUpdater({ getMainWindow });
 

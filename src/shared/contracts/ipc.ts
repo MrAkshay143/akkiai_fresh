@@ -22,6 +22,7 @@ export const IPC_CHANNELS = {
 
   // Memory Service
   MEMORY_READ_RAW: 'memory:read-raw',
+  MEMORY_WRITE_RAW: 'memory:write-raw',
   MEMORY_WRITE_ENTRY: 'memory:write-entry',
   MEMORY_DELETE_ENTRY: 'memory:delete-entry',
   MEMORY_OPTIMIZE: 'memory:optimize',

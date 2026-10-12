@@ -44,6 +44,7 @@ export interface ElectronAPI {
 
   // Memory
   readRawMemory: () => Promise<string>;
+  writeRawMemory: (content: string) => Promise<boolean>;
   writeMemoryEntry: (category: string, fact: string) => Promise<boolean>;
   deleteMemoryEntry: (id: string) => Promise<boolean>;
   optimizeMemory: () => Promise<{ status: string; count: number }>;
@@ -165,6 +166,7 @@ export const electronAPI: ElectronAPI = {
 
   // Memory
   readRawMemory: () => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_READ_RAW),
+  writeRawMemory: (content: string) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_WRITE_RAW, content),
   writeMemoryEntry: (category: string, fact: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.MEMORY_WRITE_ENTRY, { category, fact }),
   deleteMemoryEntry: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.MEMORY_DELETE_ENTRY, id),

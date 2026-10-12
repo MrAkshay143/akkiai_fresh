@@ -19,6 +19,8 @@ extraResources:
     to: audio
   - from: resources/branding
     to: branding
+  - from: electron
+    to: electron
 win:
   target:
     - portable

@@ -30,7 +30,19 @@ import {
   toggleMaximizeMainWindow,
   closeMainWindow,
   getMainWindow,
+  createMainWindow,
 } from '../windows/main-window';
+import {
+  createOnboardingWindow,
+  closeOnboardingWindow,
+  getReauthMode,
+  setReauthMode,
+  createLicenseWindow,
+  closeLicenseWindow,
+  createPwaWindow,
+  closePwaWindow,
+  showLicenseBlocked,
+} from '../windows/onboarding-window';
 import { hardwareService } from '../services/hardware/hardware-service';
 import { whatsAppManager } from '../services/whatsapp/whatsapp-manager';
 import {
@@ -178,6 +190,13 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   // ── 3. Memory Service ───────────────────────────────────────────────────────
   ipcMain.handle(IPC_CHANNELS.MEMORY_READ_RAW, () => {
     return ctx.memoryService.readRawMemory();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.MEMORY_WRITE_RAW, (_event, content: string) => {
+    return ctx.memoryService.writeRawMemory(content || '');
+  });
+  ipcMain.handle('write-raw-memory', (_event, content: string) => {
+    return ctx.memoryService.writeRawMemory(content || '');
   });
 
   ipcMain.handle(
@@ -1693,7 +1712,6 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('get-documents-path', () => app.getPath('documents'));
   ipcMain.handle('get-downloads-path', () => app.getPath('downloads'));
   ipcMain.handle('get-notes-path', () => path.join(app.getPath('userData'), 'notes'));
-  ipcMain.handle('get-stonic-data-path', () => path.join(app.getPath('documents'), 'Akki Data'));
   ipcMain.handle('get-image-output-path', () => ctx.genericStore.get()['image_output_path'] || app.getPath('downloads'));
   ipcMain.handle('save-image-output-path', (_event, val: string) => {
     ctx.genericStore.update(c => ({ ...c, image_output_path: val }));
@@ -2016,7 +2034,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     } catch (_) {}
     return {};
   });
-  ipcMain.handle('onboarding-get-mode', () => 'standard');
+  ipcMain.handle('onboarding-get-mode', () => (getReauthMode() ? 'reauth' : 'full'));
   ipcMain.handle('onboarding-save-age', (_event, age) => {
     updateUserProfile({ age });
     return true;
@@ -2235,6 +2253,48 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('license-status', () => true);
 
   ipcMain.handle('onboarding-status', () => true);
-  ipcMain.handle('onboarding-complete', () => true);
+  ipcMain.handle('onboarding-complete', async () => {
+    closeOnboardingWindow();
+    if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
+      createMainWindow();
+    }
+    return true;
+  });
+  ipcMain.handle('reauth-complete', async () => {
+    setReauthMode(false);
+    closeOnboardingWindow();
+    if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
+      createMainWindow();
+    }
+    return true;
+  });
+  ipcMain.handle('open-onboarding-window', (_event, mode?: string) => {
+    createOnboardingWindow(mode);
+    return true;
+  });
+  ipcMain.handle('close-onboarding-window', () => {
+    closeOnboardingWindow();
+    return true;
+  });
+  ipcMain.handle('open-license-window', () => {
+    createLicenseWindow();
+    return true;
+  });
+  ipcMain.handle('close-license-window', () => {
+    closeLicenseWindow();
+    return true;
+  });
+  ipcMain.handle('open-pwa-window', () => {
+    createPwaWindow();
+    return true;
+  });
+  ipcMain.handle('close-pwa-window', () => {
+    closePwaWindow();
+    return true;
+  });
+  ipcMain.handle('show-license-blocked', () => {
+    showLicenseBlocked();
+    return true;
+  });
 }
 
