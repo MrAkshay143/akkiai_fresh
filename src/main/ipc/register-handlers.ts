@@ -2463,7 +2463,6 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('get-codex-auth-status', () => false);
   ipcMain.handle('register-vertex-token', () => true);
   ipcMain.handle('validate-huggingface-token', () => true);
-  ipcMain.handle('reauth-complete', () => true);
   ipcMain.handle('remote-access-status', () => ({ enabled: false }));
   ipcMain.handle('initialize-vault', () => true);
   ipcMain.handle('open-vault-folder', () => true);
