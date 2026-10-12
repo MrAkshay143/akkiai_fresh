@@ -42,46 +42,47 @@ export const CompanionOrbCard: React.FC<CompanionOrbCardProps> = ({
   const isConnecting = status === 'CONNECTING';
 
   return (
-    <div className="w-[320px] h-[320px] md:w-[360px] md:h-[360px] 2xl:w-[400px] 2xl:h-[400px] rounded-[2.5rem] border border-[rgba(0,229,255,0.12)] bg-[#0b141b] shadow-[0_4px_60px_rgba(0,0,0,0.6),0_0_30px_rgba(0,229,255,0.05)] relative flex flex-col items-center justify-center p-4 overflow-hidden gap-2">
-      {/* ── Top Controls: Camera & Screen Share ──────────────────────── */}
-      <div className="absolute right-6 top-6 z-30 flex flex-col gap-2.5">
-        {/* Camera Toggle */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            playClick();
-            toggleCamera();
-          }}
-          disabled={isCameraLoading}
-          title={isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
-          className={`w-[36px] h-[36px] flex items-center justify-center rounded-full border transition-all duration-300 shadow-lg focus:outline-none focus:ring-0 ${
-            isCameraOn
-              ? 'bg-red-500/10 text-red-500 border-red-500/40 hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_12px_rgba(239,68,68,0.25)]'
-              : 'bg-[#0b141b]/80 text-white/45 border-white/10 hover:bg-white/5 hover:border-white/20 hover:text-white'
-          }`}
-        >
-          {isCameraLoading ? (
-            <Loader2 size={15} className="animate-spin text-j-cyan" />
-          ) : (
-            <Camera size={15} />
-          )}
-        </button>
+    <div className="flex flex-col items-center justify-center z-10 w-[400px] h-[400px]">
+      <div className="w-full h-full rounded-[2.5rem] border border-[rgba(0,229,255,0.12)] bg-[#0b141b] shadow-[0_4px_60px_rgba(0,0,0,0.6),0_0_30px_rgba(0,229,255,0.05)] relative flex flex-col items-center justify-center p-5 overflow-hidden gap-2">
+        {/* ── Top Controls: Camera & Screen Share ──────────────────────── */}
+        <div className="absolute right-6 top-6 z-30 flex flex-col gap-2.5">
+          {/* Camera Toggle */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              playClick();
+              toggleCamera();
+            }}
+            disabled={isCameraLoading}
+            title={isCameraOn ? 'Turn Camera Off' : 'Turn Camera On'}
+            className={`w-[36px] h-[36px] flex items-center justify-center rounded-full border transition-all duration-300 shadow-lg focus:outline-none focus:ring-0 focus-visible:outline-none ${
+              isCameraOn
+                ? 'bg-red-500/10 text-red-500 border-red-500/40 hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_12px_rgba(239,68,68,0.25)]'
+                : 'bg-[#0b141b]/80 text-white/45 border-white/10 hover:bg-white/5 hover:border-white/20 hover:text-white'
+            }`}
+          >
+            {isCameraLoading ? (
+              <Loader2 size={15} className="animate-spin text-j-cyan" />
+            ) : (
+              <Camera size={15} />
+            )}
+          </button>
 
-        {/* Screen Share Toggle */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            playClick();
-            toggleScreenShare();
-          }}
-          disabled={isScreenLoading}
-          title={isScreenSharing ? 'Stop Screen Share' : 'Start Screen Share'}
-          className={`w-[36px] h-[36px] flex items-center justify-center rounded-full border transition-all duration-300 shadow-lg focus:outline-none focus:ring-0 ${
-            isScreenSharing
-              ? 'bg-red-500/10 text-red-500 border-red-500/40 hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_12px_rgba(239,68,68,0.25)]'
-              : 'bg-[#0b141b]/80 text-white/45 border-white/10 hover:bg-white/5 hover:border-white/20 hover:text-white'
-          }`}
-        >
+          {/* Screen Share Toggle */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              playClick();
+              toggleScreenShare();
+            }}
+            disabled={isScreenLoading}
+            title={isScreenSharing ? 'Stop Screen Share' : 'Start Screen Share'}
+            className={`w-[36px] h-[36px] flex items-center justify-center rounded-full border transition-all duration-300 shadow-lg focus:outline-none focus:ring-0 focus-visible:outline-none ${
+              isScreenSharing
+                ? 'bg-red-500/10 text-red-500 border-red-500/40 hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_12px_rgba(239,68,68,0.25)]'
+                : 'bg-[#0b141b]/80 text-white/45 border-white/10 hover:bg-white/5 hover:border-white/20 hover:text-white'
+            }`}
+          >
           {isScreenLoading ? (
             <Loader2 size={15} className="animate-spin text-j-cyan" />
           ) : (
@@ -180,7 +181,7 @@ export const CompanionOrbCard: React.FC<CompanionOrbCardProps> = ({
         <div className="relative flex items-center justify-center w-[260px] h-10 mt-2">
           <button
             onClick={handleStartStop}
-            className={`w-[170px] h-[34px] rounded-full border text-[10px] font-black transition-all duration-300 uppercase tracking-[0.3em] flex items-center justify-center focus:outline-none focus:ring-0 ${
+            className={`w-[170px] h-[34px] rounded-full border text-[10px] font-black transition-all duration-300 uppercase tracking-[0.3em] flex items-center justify-center focus:outline-none focus:ring-0 focus-visible:outline-none ${
               isOnline
                 ? 'border-red-500/40 text-red-500 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.15)] hover:bg-red-500/20 hover:border-red-500 hover:shadow-[0_0_20px_rgba(239,68,68,0.3)]'
                 : 'border-j-cyan/30 text-j-cyan bg-j-cyan/5 shadow-[0_0_15px_rgba(0,229,255,0.05)] hover:bg-j-cyan/15 hover:border-j-cyan hover:text-[#fff] hover:shadow-[0_0_20px_rgba(0,229,255,0.2)]'
@@ -200,7 +201,7 @@ export const CompanionOrbCard: React.FC<CompanionOrbCardProps> = ({
                 e.stopPropagation();
                 toggleMic();
               }}
-              className={`w-[36px] h-[36px] flex items-center justify-center rounded-full border transition-all duration-300 shadow-lg focus:outline-none focus:ring-0 ${
+              className={`w-[36px] h-[36px] flex items-center justify-center rounded-full border transition-all duration-300 shadow-lg focus:outline-none focus:ring-0 focus-visible:outline-none ${
                 isMicMuted
                   ? 'bg-red-500/15 text-red-400 border-red-500/40 shadow-[0_0_12px_rgba(239,68,68,0.25)]'
                   : 'bg-j-cyan/15 text-j-cyan border-j-cyan/40 shadow-[0_0_12px_rgba(0,229,255,0.25)]'
@@ -213,5 +214,6 @@ export const CompanionOrbCard: React.FC<CompanionOrbCardProps> = ({
         </div>
       </div>
     </div>
+  </div>
   );
 };
