@@ -1,5 +1,6 @@
 import React from 'react';
 import { Camera, Monitor, Mic, MicOff, Loader2 } from 'lucide-react';
+import { NexusAvatarView } from './NexusAvatarView';
 import { HolographicOrb } from './HolographicOrb';
 
 interface CompanionOrbCardProps {
@@ -129,7 +130,7 @@ export const CompanionOrbCard: React.FC<CompanionOrbCardProps> = ({
           </div>
         ) : (
           <div className="pointer-events-none w-full flex justify-center">
-            <HolographicOrb
+            <NexusAvatarView
               isSpeaking={isAISpeaking}
               isConnected={isOnline}
               isConnecting={isConnecting}
