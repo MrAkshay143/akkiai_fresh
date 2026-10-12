@@ -330,19 +330,21 @@ let licenseMonitorInterval: NodeJS.Timeout | null = null;
 
 export function startLicenseApprovalWatch(
   hardwareId: string,
-  email: string,
+  email?: string,
   onStatusChange?: (status: 'approved' | 'blocked') => void
 ): void {
   stopLicenseApprovalWatch();
 
+  const userEmail = email || getLicenseState()?.email || '';
+
   const poll = async () => {
     try {
-      const res = await checkRemoteLicenseStatus(email, hardwareId);
+      const res = await checkRemoteLicenseStatus(userEmail, hardwareId);
       if (res.status === 'approved' || res.status === 'blocked') {
         stopLicenseApprovalWatch();
         if (onStatusChange) onStatusChange(res.status);
         if (res.status === 'approved') {
-          startLicenseMonitor(hardwareId, email);
+          startLicenseMonitor(hardwareId, userEmail);
         }
       }
     } catch {}
@@ -361,14 +363,16 @@ export function stopLicenseApprovalWatch(): void {
 
 export function startLicenseMonitor(
   hardwareId: string,
-  email: string,
+  email?: string,
   onBlocked?: () => void
 ): void {
   stopLicenseMonitor();
 
+  const userEmail = email || getLicenseState()?.email || '';
+
   const check = async () => {
     try {
-      const res = await sendHeartbeat(email, hardwareId);
+      const res = await sendHeartbeat(userEmail, hardwareId);
       if (res.status === 'blocked') {
         stopLicenseMonitor();
         if (onBlocked) onBlocked();

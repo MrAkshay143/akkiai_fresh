@@ -21,8 +21,8 @@ interface AppState {
   centerView: 'agent-town' | 'visual-hub';
   setCenterView: (view: 'agent-town' | 'visual-hub') => void;
 
-  activeModal: 'soul' | 'memory' | 'skills' | 'settings' | 'profile' | 'wizard' | null;
-  setActiveModal: (modal: 'soul' | 'memory' | 'skills' | 'settings' | 'profile' | 'wizard' | null) => void;
+  activeModal: 'soul' | 'memory' | 'skills' | 'settings' | 'profile' | null;
+  setActiveModal: (modal: 'soul' | 'memory' | 'skills' | 'settings' | 'profile' | null) => void;
 
   isGuideModalOpen: boolean;
   setIsGuideModalOpen: (open: boolean) => void;

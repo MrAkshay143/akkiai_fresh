@@ -13,7 +13,6 @@ contextBridge.exposeInMainWorld('licenseAPI', {
 
   // License
   getLicenseStatus: () => ipcRenderer.invoke('license-get-status'),
-  submitPayment: (data) => ipcRenderer.invoke('license-submit-payment', data),
   getHardwareId: () => ipcRenderer.invoke('license-get-hardware-id'),
   onLicenseApproved: (callback) => {
     ipcRenderer.on('license-approved', () => callback())
@@ -35,4 +34,5 @@ contextBridge.exposeInMainWorld('licenseAPI', {
 
   // WhatsApp
   openWhatsApp: (text) => ipcRenderer.invoke('license-open-whatsapp', text),
+  onboardingComplete: () => ipcRenderer.invoke('onboarding-complete'),
 })

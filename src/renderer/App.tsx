@@ -9,7 +9,6 @@ import { SoulModal } from '@/components/modals/SoulModal';
 import { MemoryModal } from '@/components/modals/MemoryModal';
 import { SkillsModal } from '@/components/modals/SkillsModal';
 import { SettingsModal } from '@/components/modals/SettingsModal';
-import { OnboardingWizardModal } from '@/components/modals/OnboardingWizardModal';
 import { GuideModal } from '@/components/modals/GuideModal';
 import { MediaPlayerPopup } from '@/features/media/MediaPlayerPopup';
 import { useAppStore } from '@/state/useAppStore';
@@ -264,7 +263,6 @@ export const App: React.FC = () => {
       <MemoryModal />
       <SkillsModal />
       <SettingsModal />
-      <OnboardingWizardModal isOpen={activeModal === 'wizard'} onClose={() => setActiveModal(null)} />
       <GuideModal />
 
       {/* ── Dedicated Neural Media Player Popup (VH) ─────────────────── */}

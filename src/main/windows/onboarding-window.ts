@@ -125,6 +125,10 @@ export function closeOnboardingWindow(): void {
   }
 }
 
+export function getLicenseWindow(): BrowserWindow | null {
+  return licenseWindow;
+}
+
 export function createLicenseWindow(): BrowserWindow {
   if (licenseWindow && !licenseWindow.isDestroyed()) {
     if (licenseWindow.isMinimized()) licenseWindow.restore();

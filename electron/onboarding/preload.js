@@ -7,7 +7,6 @@ contextBridge.exposeInMainWorld('onboardingAPI', {
   signOut: () => ipcRenderer.invoke('auth-sign-out'),
   getAuthStatus: () => ipcRenderer.invoke('auth-get-status'),
   getHardwareId: () => ipcRenderer.invoke('license-get-hardware-id'),
-  submitPayment: (data) => ipcRenderer.invoke('license-submit-payment', data),
   getLicenseStatus: () => ipcRenderer.invoke('license-get-status'),
   openWhatsApp: (text) => ipcRenderer.invoke('license-open-whatsapp', text),
   getOnboardingData: () => ipcRenderer.invoke('onboarding-get-data'),

@@ -15,8 +15,20 @@ try {
 
 import { ensureAkkiDirectories } from './services/storage/paths';
 import { createMainWindow, getMainWindow } from './windows/main-window';
-import { showLicenseBlocked, createOnboardingWindow } from './windows/onboarding-window';
-import { isLicenseBlocked } from './services/license/license-manager';
+import {
+  showLicenseBlocked,
+  createOnboardingWindow,
+  closeOnboardingWindow,
+  closeLicenseWindow,
+  getOnboardingWindow,
+  getLicenseWindow,
+} from './windows/onboarding-window';
+import {
+  isLicenseBlocked,
+  getLicenseState,
+  startLicenseApprovalWatch,
+  startLicenseMonitor,
+} from './services/license/license-manager';
 import { InfoPanelWindowManager } from './windows/info-panel-window';
 import { LocalStore } from './services/storage/local-store';
 import { MemoryService } from './services/memory/memory-service';
@@ -232,13 +244,59 @@ if (!gotTheLock) {
       skillsService,
     });
 
-    // 4. Initialize Primary Electron Window or License Blocked
-    if (isLicenseBlocked()) {
+    // 4. License Verification & Window Routing
+    const licState = getLicenseState();
+    const licenseStatus = licState?.status || 'none';
+
+    if (licenseStatus === 'blocked' || isLicenseBlocked()) {
+      console.log('[Akki] License blocked. Showing blocked dialog...');
       showLicenseBlocked();
       return;
     }
 
-    createMainWindow();
+    if (licenseStatus !== 'approved') {
+      if (licenseStatus === 'pending' && licState?.hardwareId) {
+        console.log('[Akki] License pending. Starting approval watch for hwid:', licState.hardwareId);
+        startLicenseApprovalWatch(licState.hardwareId, licState.email, (status) => {
+          if (status === 'approved') {
+            try {
+              const obWin = getOnboardingWindow();
+              if (obWin && !obWin.isDestroyed()) {
+                obWin.webContents.send('license-status-changed', { status: 'approved', plan: 'pro' });
+                obWin.webContents.send('license-approved');
+              }
+            } catch (_) {}
+            try {
+              const licWin = getLicenseWindow();
+              if (licWin && !licWin.isDestroyed()) {
+                licWin.webContents.send('license-status-changed', { status: 'approved', plan: 'pro' });
+                licWin.webContents.send('license-approved');
+              }
+            } catch (_) {}
+            closeOnboardingWindow();
+            closeLicenseWindow();
+            if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
+              createMainWindow();
+            }
+          } else if (status === 'blocked') {
+            closeOnboardingWindow();
+            closeLicenseWindow();
+            showLicenseBlocked();
+          }
+        });
+      }
+
+      console.log('[Akki] License not approved. Showing onboarding window...');
+      createOnboardingWindow();
+    } else {
+      if (licState?.hardwareId) {
+        startLicenseMonitor(licState.hardwareId, licState.email, () => {
+          showLicenseBlocked();
+        });
+      }
+      createMainWindow();
+    }
+
     setupAutoUpdater({ getMainWindow });
 
     // 5. Start Agent Town Standalone Server (Phaser 3 simulation on port 3000)

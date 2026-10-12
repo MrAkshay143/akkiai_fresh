@@ -2385,18 +2385,6 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     await shell.openExternal(url);
     return true;
   });
-  ipcMain.handle('license-submit-payment', async (_event, payload: any) => {
-    const hwId = generateHardwareId();
-    const session = await firebaseService.getStoredSession();
-    const email = payload?.email || session?.user?.email;
-    const plan = payload?.plan || 'pro';
-    savePendingLicense({
-      email,
-      plan,
-      hardwareId: hwId,
-    });
-    return { success: true, message: 'Payment submitted for verification' };
-  });
   ipcMain.handle('license-passed', () => isEffectiveLicensed());
 
   const getUserProfilePath = () => path.join(app.getPath('userData'), 'user_profile.json');
@@ -2724,6 +2712,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('onboarding-status', () => true);
   ipcMain.handle('onboarding-complete', async () => {
     closeOnboardingWindow();
+    closeLicenseWindow();
     if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
       createMainWindow();
     }
@@ -2732,6 +2721,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('reauth-complete', async () => {
     setReauthMode(false);
     closeOnboardingWindow();
+    closeLicenseWindow();
     if (!getMainWindow() || getMainWindow()?.isDestroyed()) {
       createMainWindow();
     }
