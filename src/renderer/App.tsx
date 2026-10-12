@@ -232,26 +232,24 @@ export const App: React.FC = () => {
       <div id="AKKI-main-layout" className="flex-1 flex flex-col relative z-10 bg-transparent p-4 min-h-0">
         <main className="flex-1 flex overflow-hidden z-10 relative bg-transparent gap-2 md:gap-4 h-full w-full">
           {/* ── Left Column: Tasks / Notes + Windy Radar (Exact Legacy nK) ── */}
-          <section className="hidden xl:flex w-[320px] 2xl:w-[360px] shrink-0 h-full flex-col">
+          <section className="hidden xl:flex w-[365px] 2xl:w-[420px] shrink-0 h-full flex-col">
             <LeftPanel />
           </section>
 
           {/* ── Center Column: Companion Hub + Agent Town / Visual Hub (Exact Legacy uK flex ratio) ────── */}
-          <div className="flex-1 min-w-0 relative h-full flex flex-col">
-            <section className="flex-1 flex flex-col min-w-0 min-h-0 relative h-full gap-4 md:gap-6 transition-all duration-300">
-              <div className="flex-[0.9] flex items-center justify-center w-full min-h-0 relative z-20">
-                <CompanionHero />
+          <section className="flex-1 flex flex-col min-w-0 min-h-0 relative h-full gap-2 md:gap-4 transition-all duration-300 overflow-hidden">
+            <div className="flex-[0.9] flex items-center justify-center w-full min-h-0 relative z-20">
+              <CompanionHero />
+            </div>
+            <div className="flex-[1.3] w-full relative z-10 min-h-0 mt-0 agent-town-parent">
+              <div style={{ display: centerView === 'agent-town' ? 'block' : 'none', height: '100%', width: '100%' }}>
+                <AgentTownView />
               </div>
-              <div className="flex-[1.3] w-full relative z-10 min-h-0 mt-0 agent-town-parent">
-                <div style={{ display: centerView === 'agent-town' ? 'block' : 'none', height: '100%', width: '100%' }}>
-                  <AgentTownView />
-                </div>
-                <div style={{ display: centerView === 'visual-hub' ? 'block' : 'none', height: '100%', width: '100%' }}>
-                  <VisualHubOverlay />
-                </div>
+              <div style={{ display: centerView === 'visual-hub' ? 'block' : 'none', height: '100%', width: '100%' }}>
+                <VisualHubOverlay />
               </div>
-            </section>
-          </div>
+            </div>
+          </section>
 
           {/* ── Right Column: Chats / Logs Drawer (Exact Legacy AK) ─────────────── */}
           <aside className="hidden md:flex w-[380px] 2xl:w-[410px] h-full shrink-0 flex-col relative">

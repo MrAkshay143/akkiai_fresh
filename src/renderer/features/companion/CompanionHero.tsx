@@ -55,7 +55,8 @@ export const CompanionHero: React.FC = () => {
 
   const isSmall = windowWidth < 768;
   const isMedium = windowWidth >= 768 && windowWidth < 1280;
-  const gapToGlobe = isSmall ? 40 : isMedium ? 100 : 340;
+  const isLarge = windowWidth >= 1280 && windowWidth < 1680;
+  const gapToGlobe = isSmall ? 25 : isMedium ? 35 : isLarge ? 50 : 75;
 
   // Camera Management
   const stopCamera = () => {
@@ -132,40 +133,40 @@ export const CompanionHero: React.FC = () => {
       : 'STANDBY';
 
   return (
-    <div
-      className="flex items-center justify-center max-w-[1200px] w-full mx-auto relative pt-2 md:pt-4"
-      style={{ gap: gapToGlobe }}
-    >
-      {/* ── Left Trigger Nodes (Memory, Soul, Skills, Settings with dynamic SVG fiber lines) ── */}
-      <div className="w-[150px] md:w-[220px] shrink-0 z-0 flex flex-col justify-center">
-        <CompanionNodeTriggers
-          setIsMemoryModalOpen={() => setActiveModal('memory')}
-          setMemoryModalTab={() => setActiveModal('memory')}
-          setIsSoulModalOpen={() => setActiveModal('soul')}
-          setIsSkillsModalOpen={() => setActiveModal('skills')}
-          setIsSettingsModalOpen={() => setActiveModal('settings')}
-          playClick={playClick}
-          gapToGlobe={gapToGlobe + 20}
-        />
-      </div>
+    <div className="flex items-center justify-center max-w-[1200px] w-full mx-auto relative pt-2 md:pt-4">
+      <div
+        className="flex items-center justify-center w-full relative"
+        style={{ gap: gapToGlobe }}
+      >
+        {/* ── Left Trigger Nodes (Memory, Soul, Skills, Settings with dynamic SVG fiber lines) ── */}
+        <div className="w-[140px] md:w-[190px] shrink-0 z-0 flex flex-col justify-center">
+          <CompanionNodeTriggers
+            setIsMemoryModalOpen={() => setActiveModal('memory')}
+            setMemoryModalTab={() => setActiveModal('memory')}
+            setIsSoulModalOpen={() => setActiveModal('soul')}
+            setIsSkillsModalOpen={() => setActiveModal('skills')}
+            setIsSettingsModalOpen={() => setActiveModal('settings')}
+            playClick={playClick}
+            gapToGlobe={gapToGlobe + 20}
+          />
+        </div>
 
-      {/* ── Center Stage Holographic Orb & Camera / Screen Hub ───────── */}
-      <div className="relative z-10 flex flex-col items-center justify-center p-2 shrink-0 h-full transform scale-[0.8] md:scale-100 origin-center">
-        <video ref={previewVideoRef} autoPlay playsInline muted className="hidden" aria-hidden="true" />
-        <canvas width={640} height={480} className="hidden" aria-hidden="true" />
-        <CompanionOrbCard
-          status={legacyStatus}
-          isAISpeaking={assistantStatus === 'speaking'}
-          handleStartStop={handleStartStop}
-          isMicMuted={isMicMuted}
-          toggleMic={toggleMic}
-          isCameraOn={isCameraOn}
-          isScreenSharing={isScreenSharing}
-          previewVideoRef={previewVideoRef as any}
-          toggleCamera={handleToggleCamera}
-          toggleScreenShare={handleToggleScreenShare}
-          playClick={playClick}
-        />
+        {/* ── Center Stage Holographic Orb & Camera / Screen Hub ───────── */}
+        <div className="relative z-10 flex flex-col items-center justify-center p-1 shrink-0 h-full origin-center">
+          <CompanionOrbCard
+            status={legacyStatus}
+            isAISpeaking={assistantStatus === 'speaking'}
+            handleStartStop={handleStartStop}
+            isMicMuted={isMicMuted}
+            toggleMic={toggleMic}
+            isCameraOn={isCameraOn}
+            isScreenSharing={isScreenSharing}
+            previewVideoRef={previewVideoRef as any}
+            toggleCamera={handleToggleCamera}
+            toggleScreenShare={handleToggleScreenShare}
+            playClick={playClick}
+          />
+        </div>
       </div>
     </div>
   );
