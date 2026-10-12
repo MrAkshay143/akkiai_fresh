@@ -98,6 +98,10 @@ export interface ElectronAPI {
   // Audio SFX
   playSfx: (soundName: string) => Promise<void>;
 
+  // Keyboard automation
+  keyboardPress?: (payload: { key: string }) => Promise<any>;
+  keyboardType?: (payload: { text: string; pressEnter?: boolean }) => Promise<any>;
+
   // Generic invoker
   invoke: <T = unknown>(channel: string, ...args: unknown[]) => Promise<T>;
 
@@ -219,6 +223,10 @@ export const electronAPI: ElectronAPI = {
 
   // Audio SFX
   playSfx: (soundName: string) => ipcRenderer.invoke(IPC_CHANNELS.AUDIO_PLAY_SFX, soundName),
+
+  // Keyboard automation
+  keyboardPress: (payload: { key: string }) => ipcRenderer.invoke('keyboard-press', payload),
+  keyboardType: (payload: { text: string; pressEnter?: boolean }) => ipcRenderer.invoke('keyboard-type', payload),
 
   // Generic
   invoke: <T = unknown>(channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args) as Promise<T>,

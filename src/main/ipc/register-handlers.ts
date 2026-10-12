@@ -1299,7 +1299,253 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('whatsapp-init', async () => whatsAppManager.initialize());
   ipcMain.handle('whatsapp-logout', async () => whatsAppManager.logout());
   ipcMain.handle('whatsapp-send-reply', async (_event, { to, message }: any) => whatsAppManager.sendReply(to, message));
-  ipcMain.handle('send-whatsapp-keyboard', () => ({ success: true }));
+  ipcMain.handle('send-whatsapp-keyboard', async (_event, args: any) => {
+    try {
+      const name = String(args?.name || '').trim();
+      const message = String(args?.message || '').replace(/[\r\n]+/g, ' ').trim();
+
+      if (!name || !message) {
+        console.error('[WhatsApp Robot] Missing name or message:', { name, message });
+        return { success: false, error: 'Contact name and message are required' };
+      }
+
+      const loadRobot = () => require('@jitsi/robotjs');
+
+      if (process.platform === 'darwin') {
+        const { isMac } = require('../services/platform-utils');
+        if (isMac) {
+          let robot: any;
+          try {
+            robot = loadRobot();
+          } catch (e: any) {
+            return { success: false, error: 'RobotJS not available on macOS.' };
+          }
+          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+          try { robot.setKeyboardDelay(12); } catch (_) {}
+          try {
+            await new Promise((resolve) => {
+              exec('osascript -e \'tell application "WhatsApp" to activate\'', { timeout: 10000 }, () => resolve(true));
+            });
+          } catch (_) {}
+          await sleep(3000);
+          robot.keyTap('f', 'command');
+          await sleep(800);
+          robot.keyTap('a', 'command');
+          await sleep(200);
+          robot.keyTap('backspace');
+          await sleep(300);
+          robot.typeString(name);
+          await sleep(2500);
+          robot.keyTap('enter');
+          await sleep(1500);
+          robot.typeString(message);
+          await sleep(800);
+          robot.keyTap('enter');
+          await sleep(300);
+          return { success: true, output: 'Message sent successfully using RobotJS (macOS)', method: 'robotjs_mouse_mac' };
+        }
+      }
+
+      let robot: any;
+      try {
+        robot = loadRobot();
+      } catch (error: any) {
+        console.error('[WhatsApp Robot] RobotJS not available:', error?.message);
+        return { success: false, error: 'RobotJS module not installed. Run: npm install @jitsi/robotjs' };
+      }
+
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+      try { robot.setKeyboardDelay(12); } catch (_) {}
+
+      // 1. Bring WhatsApp Desktop to the foreground.
+      exec('start whatsapp:', (error) => {
+        if (error) console.warn('[WhatsApp Robot] Could not open via protocol:', error.message);
+      });
+
+      // 2. Give it a cold-start window.
+      await sleep(7000);
+
+      // 3. Open chat search (Ctrl+F) and clear.
+      robot.keyTap('f', 'control');
+      await sleep(1800);
+      robot.keyTap('a', 'control');
+      await sleep(200);
+      robot.keyTap('backspace');
+      await sleep(400);
+
+      // 4. Type the contact name and let search results settle.
+      robot.typeString(name);
+      await sleep(2500);
+
+      // 5. Open the first match.
+      robot.keyTap('enter');
+      await sleep(1800);
+
+      // 6. Type the message and send.
+      robot.typeString(message);
+      await sleep(1000);
+      robot.keyTap('enter');
+      await sleep(400);
+
+      return {
+        success: true,
+        output: 'Message sent successfully using RobotJS',
+        method: 'robotjs_native',
+      };
+    } catch (error: any) {
+      console.error(error);
+      return { success: false, error: error?.message };
+    }
+  });
+
+  ipcMain.handle('keyboard-press', async (_event, { key }: any = {}) => {
+    const startTime = Date.now();
+    try {
+      let robot: any;
+      try {
+        robot = require('@jitsi/robotjs');
+      } catch (_error: any) {
+        return {
+          success: false,
+          toolName: 'keyboard_press',
+          error: 'RobotJS module not available. Keyboard control requires @jitsi/robotjs.',
+          errorCode: 'MODULE_NOT_AVAILABLE',
+          errorCategory: 'config',
+          retryable: false,
+          debugInfo: { executionTimeMs: Date.now() - startTime },
+        };
+      }
+
+      const lowerKey = String(key || '').toLowerCase().trim();
+      if (lowerKey.includes('+')) {
+        const parts = lowerKey.split('+');
+        const mainKey = parts.pop()!;
+        const modifiers = parts;
+        const modMap: Record<string, string> = { ctrl: 'control', alt: 'alt', shift: 'shift', cmd: 'command', win: 'command' };
+        const robotModifiers = modifiers.map((modifier) => modMap[modifier] || modifier);
+
+        robot.keyTap(mainKey, robotModifiers);
+        console.log(`[Keyboard] Pressed: ${robotModifiers.join('+')}+${mainKey}`);
+        return {
+          success: true,
+          toolName: 'keyboard_press',
+          result: `Pressed ${key}`,
+          debugInfo: { executionTimeMs: Date.now() - startTime },
+        };
+      }
+
+      const keyMap: Record<string, string> = {
+        enter: 'enter',
+        return: 'enter',
+        tab: 'tab',
+        escape: 'escape',
+        esc: 'escape',
+        backspace: 'backspace',
+        delete: 'delete',
+        space: 'space',
+        up: 'up',
+        down: 'down',
+        left: 'left',
+        right: 'right',
+        home: 'home',
+        end: 'end',
+        pageup: 'pageup',
+        pagedown: 'pagedown',
+        f1: 'f1',
+        f2: 'f2',
+        f3: 'f3',
+        f4: 'f4',
+        f5: 'f5',
+        f6: 'f6',
+        f7: 'f7',
+        f8: 'f8',
+        f9: 'f9',
+        f10: 'f10',
+        f11: 'f11',
+        f12: 'f12',
+        printscreen: 'printscreen',
+        insert: 'insert',
+        capslock: 'capslock',
+        numlock: 'numlock',
+        scrolllock: 'scrolllock',
+      };
+
+      const robotKey = keyMap[lowerKey] || lowerKey;
+      robot.keyTap(robotKey);
+      console.log(`[Keyboard] Pressed: ${robotKey}`);
+
+      return {
+        success: true,
+        toolName: 'keyboard_press',
+        result: `Pressed ${key}`,
+        debugInfo: { executionTimeMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      console.error('[Keyboard] Press failed:', error?.message);
+      return {
+        success: false,
+        toolName: 'keyboard_press',
+        error: `Key press failed: ${error?.message}`,
+        errorCode: 'UNKNOWN_ERROR',
+        errorCategory: 'transient',
+        retryable: true,
+        retrySuggestion: 'Make sure the target window is focused and try again.',
+        debugInfo: { executionTimeMs: Date.now() - startTime, key },
+      };
+    }
+  });
+
+  ipcMain.handle('keyboard-type', async (_event, { text, pressEnter }: any = {}) => {
+    const startTime = Date.now();
+    try {
+      let robot: any;
+      try {
+        robot = require('@jitsi/robotjs');
+      } catch (_error: any) {
+        return {
+          success: false,
+          toolName: 'simulate_keyboard_press',
+          error: 'RobotJS module not available. Keyboard control requires @jitsi/robotjs.',
+          errorCode: 'MODULE_NOT_AVAILABLE',
+          errorCategory: 'config',
+          retryable: false,
+          debugInfo: { executionTimeMs: Date.now() - startTime },
+        };
+      }
+
+      if (text && text.length > 0) {
+        robot.typeString(text);
+        console.log(`[Keyboard] Typed: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}" (${text.length} chars)`);
+      }
+
+      if (pressEnter) {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        robot.keyTap('enter');
+        console.log('[Keyboard] Pressed Enter after typing');
+      }
+
+      return {
+        success: true,
+        toolName: 'simulate_keyboard_press',
+        result: `Typed "${text}"${pressEnter ? ' and pressed Enter' : ''}`,
+        data: { charCount: text?.length || 0, enterPressed: !!pressEnter },
+        debugInfo: { executionTimeMs: Date.now() - startTime },
+      };
+    } catch (error: any) {
+      console.error('[Keyboard] Type failed:', error?.message);
+      return {
+        success: false,
+        toolName: 'simulate_keyboard_press',
+        error: `Typing failed: ${error?.message}`,
+        errorCode: 'UNKNOWN_ERROR',
+        errorCategory: 'transient',
+        retryable: true,
+        retrySuggestion: 'Make sure the target input is focused. Try clicking on it first, then type.',
+        debugInfo: { executionTimeMs: Date.now() - startTime, textLength: text?.length },
+      };
+    }
+  });
+
   ipcMain.handle('get-whatsapp-settings', () => ctx.genericStore.get()['whatsapp_settings'] || {});
   ipcMain.handle('save-whatsapp-settings', (_event, settings: any) => {
     ctx.genericStore.update(c => ({ ...c, whatsapp_settings: settings }));
