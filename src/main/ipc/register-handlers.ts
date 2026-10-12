@@ -56,6 +56,13 @@ import {
   downloadUpdate,
   installUpdate,
 } from '../services/auto-updater';
+import {
+  readConfig as readToolsConfig,
+  writeConfig as writeToolsConfig,
+  fetchGeminiModels,
+  fetchOpenRouterModels,
+  DEFAULT_CONFIG as DEFAULT_TOOLS_CONFIG,
+} from '../services/tools/tools-config-manager';
 
 export interface IpcContext {
   tasksStore: LocalStore<TaskItem[]>;
@@ -1727,81 +1734,21 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle('get-tools-config', async () => {
     try {
-      const p = getUserDataPath('tools_config.json');
-      if (fs.existsSync(p)) {
-        return JSON.parse(fs.readFileSync(p, 'utf8'));
-      }
-    } catch (e) {
-      console.warn('[IPC:get-tools-config] Error reading tools_config.json:', e);
+      return readToolsConfig();
+    } catch (err: any) {
+      console.error('[IPC:get-tools-config] Error:', err?.message);
+      return DEFAULT_TOOLS_CONFIG;
     }
-    return ctx.genericStore.get()['tools_config'] || {
-      version: 1,
-      enableGlobalFallback: true,
-      defaultGlobalFallbackModel: 'gemini-3.5-flash-lite',
-      tools: {
-        web_search: {
-          model: 'gemini-3.5-flash-lite',
-          customModel: '',
-          usePrimaryApiKey: true,
-          customApiKey: '',
-          enableFallback: true,
-          fallbackModel: 'gemini-3.5-flash-lite',
-          isRetired: false,
-        },
-        whatsapp_transcribe: {
-          model: 'gemini-3.8-flash',
-          customModel: '',
-          usePrimaryApiKey: true,
-          customApiKey: '',
-          enableFallback: true,
-          fallbackModel: 'gemini-3.5-flash-lite',
-          isRetired: false,
-        },
-        dashboard_fetch: {
-          model: 'gemini-3.8-flash',
-          customModel: '',
-          usePrimaryApiKey: true,
-          customApiKey: '',
-          enableFallback: true,
-          fallbackModel: 'gemini-3.5-flash-lite',
-          isRetired: false,
-        },
-        subagent_runner: {
-          model: 'gemini-3.8-flash',
-          customModel: '',
-          usePrimaryApiKey: true,
-          customApiKey: '',
-          enableFallback: true,
-          fallbackModel: 'gemini-3.5-flash-lite',
-          isRetired: false,
-        },
-        voice_live: {
-          model: 'gemini-3.8-flash-exp',
-          customModel: '',
-          usePrimaryApiKey: true,
-          customApiKey: '',
-          enableFallback: false,
-          fallbackModel: 'gemini-3.8-flash',
-          isRetired: false,
-        },
-        image_generation: {
-          provider: 'huggingface',
-          model: 'black-forest-labs/FLUX.1-schnell',
-          token: '',
-        },
-      },
-    };
   });
 
   ipcMain.handle('save-tools-config', async (_event, config: any) => {
     try {
-      const p = getUserDataPath('tools_config.json');
-      fs.writeFileSync(p, JSON.stringify(config, null, 2), 'utf8');
+      const ok = writeToolsConfig(config);
       ctx.genericStore.update(c => ({ ...c, tools_config: config }));
-      return true;
-    } catch (e) {
-      console.error('[IPC:save-tools-config] Error writing tools_config.json:', e);
-      return false;
+      return { success: ok };
+    } catch (err: any) {
+      console.error('[IPC:save-tools-config] Error:', err?.message);
+      return { success: false, error: err?.message };
     }
   });
 
@@ -1931,7 +1878,24 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return '';
   });
 
-  ipcMain.handle('refresh-available-models', async () => {
+  ipcMain.handle('refresh-available-models', async (_event, params?: { provider?: string; apiKey?: string }) => {
+    try {
+      if (params?.provider === 'openrouter') {
+        const models = await fetchOpenRouterModels();
+        return { success: true, models };
+      }
+      if (params?.provider === 'gemini') {
+        let finalKey = params.apiKey || '';
+        if (!finalKey) {
+          finalKey = getSecretKeyFromDiskOrStore();
+        }
+        const models = await fetchGeminiModels(finalKey);
+        return { success: true, models };
+      }
+    } catch (e: any) {
+      console.warn('[IPC:refresh-available-models] Provider fetch warning:', e?.message);
+    }
+
     const customPath = getUserDataPath('custom_models.json');
     let customModels: any = { openRouter: [], gemini: [], openai: [] };
     if (fs.existsSync(customPath)) {
@@ -1956,6 +1920,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       gemini: [...defaultGemini, ...(customModels.gemini || [])],
       openRouter: [...defaultOpenRouter, ...(customModels.openRouter || [])],
       openai: customModels.openai || [],
+      models: defaultGemini.map((m) => m.id),
     };
   });
 

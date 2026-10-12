@@ -27,6 +27,7 @@ import { registerIpcHandlers } from './ipc/register-handlers';
 import { SkillsService } from './services/skills/skills-service';
 import { firebaseService } from './services/auth/firebase-service';
 import { setupAutoUpdater } from './services/auto-updater';
+import { bootstrapMacPermissions } from './services/macos-permissions';
 import type {
   TaskItem,
   NoteItem,
@@ -75,6 +76,7 @@ if (!gotTheLock) {
   app.whenReady().then(() => {
     // 1. Security & CSP Configuration
     configureCsp();
+    bootstrapMacPermissions();
 
     // 2. Service Layer Instantiation
     ensureAkkiDirectories(app);
