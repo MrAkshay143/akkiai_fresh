@@ -50,9 +50,8 @@ export const CompanionNodeTriggers: React.FC<CompanionNodeTriggersProps> = ({
       const el = containerRef.current;
       if (!el) return;
 
-      const rect = el.getBoundingClientRect();
-      const w = rect.width;
-      const h = rect.height;
+      const w = el.offsetWidth || el.getBoundingClientRect().width;
+      const h = el.offsetHeight || el.getBoundingClientRect().height;
       const targetX = w + gapToGlobe;
       const centerY = h / 2;
 
@@ -68,9 +67,8 @@ export const CompanionNodeTriggers: React.FC<CompanionNodeTriggersProps> = ({
         const fallback = { d: '', color: NODES[idx].color, x1: w, y1: centerY };
         if (!btn) return fallback;
 
-        const btnRect = btn.getBoundingClientRect();
-        const startX = btnRect.right - rect.left;
-        const startY = btnRect.top - rect.top + btnRect.height / 2;
+        const startX = btn.offsetLeft + btn.offsetWidth;
+        const startY = btn.offsetTop + btn.offsetHeight / 2;
         const controlXDist = trunkStart - startX;
         const cp1X = startX + controlXDist * 0.55;
         const cp2X = trunkStart - controlXDist * 0.15;
