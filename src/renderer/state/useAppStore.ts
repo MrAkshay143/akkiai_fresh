@@ -18,6 +18,11 @@ interface AppState {
   rightPanelTab: 'chats' | 'logs';
   setRightPanelTab: (tab: 'chats' | 'logs') => void;
 
+  rightWidth: number;
+  setRightWidth: (w: number) => void;
+  isResizingRight: boolean;
+  setIsResizingRight: (r: boolean) => void;
+
   centerView: 'agent-town' | 'visual-hub';
   setCenterView: (view: 'agent-town' | 'visual-hub') => void;
 
@@ -37,7 +42,7 @@ interface AppState {
 
   // Chat
   messages: ChatMessage[];
-  setMessages: (messages: ChatMessage[]) => void;
+  setMessages: (messages: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => void;
   addMessage: (message: ChatMessage) => void;
   clearMessages: () => void;
   isStreaming: boolean;
@@ -110,6 +115,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   rightPanelTab: 'chats',
   setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
 
+  rightWidth: 510,
+  setRightWidth: (rightWidth) => set({ rightWidth }),
+  isResizingRight: false,
+  setIsResizingRight: (isResizingRight) => set({ isResizingRight }),
+
   centerView: 'agent-town',
   setCenterView: (view) => set({ centerView: view }),
 
@@ -129,10 +139,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   messages: [],
   setMessages: (messages) => {
-    set({ messages });
-    if ((window as any).electronAPI?.saveChats) {
-      (window as any).electronAPI.saveChats(messages);
-    }
+    set((state) => {
+      const resolved = typeof messages === 'function' ? (messages as (prev: ChatMessage[]) => ChatMessage[])(state.messages) : messages;
+      if ((window as any).electronAPI?.saveChats) {
+        (window as any).electronAPI.saveChats(resolved);
+      }
+      return { messages: resolved };
+    });
   },
   addMessage: (message) => {
     set((state) => {

@@ -313,8 +313,10 @@ if (!gotTheLock) {
       });
 
     // 6. Start Hermes Bridge Gateway (OpenClaw protocol WebSocket server on port 18789)
-    // hermesBridgeService.setAgentCoordinator(agentCoordinator);
-    try { hermesBridgeService.startHermesBridge(app); } catch (err: any) {
+    try {
+      hermesBridgeService.setAgentCoordinator(agentCoordinator);
+      hermesBridgeService.startHermesBridge(app);
+    } catch (err: any) {
       console.warn('[AkkiAI] Hermes bridge startup notice:', err.message);
     }
 

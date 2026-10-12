@@ -55,6 +55,11 @@ let wsServer = null;
 let httpServer = null;
 let actualBridgePort = null;
 let _toolResultCallback = null;
+let _agentCoordinator = null;
+
+function setAgentCoordinator(coordinator) {
+  _agentCoordinator = coordinator;
+}
 
 // ── Hermes Path Resolution ──────────────────────────────
 
@@ -483,6 +488,60 @@ function handleChatSend(state, id, params, hermesConfig) {
   // Resolve Hermes paths
   const { pythonPath, projectPath } = hermesConfig;
   if (!pythonPath || !projectPath) {
+    if (_agentCoordinator) {
+      log.info(`[Hermes Bridge] Hermes Python CLI not found — delegating run ${runId} to AgentCoordinator (${params.seatLabel || 'Auto-select'})`);
+      broadcastEvent('agent', {
+        runId, sessionKey,
+        stream: 'reasoning',
+        data: { text: 'Thinking...' },
+      });
+
+      const task = _agentCoordinator.assignTask(
+        params.seatLabel || undefined,
+        rawMessage.slice(0, 60),
+        rawMessage
+      );
+
+      const onProgress = (t: any) => {
+        if (t.id === task.id && t.partialResult) {
+          broadcastEvent('agent', {
+            runId, sessionKey,
+            stream: 'assistant',
+            data: { delta: t.partialResult },
+          });
+        }
+      };
+
+      const onCompleted = (t: any) => {
+        if (t.id === task.id) {
+          _agentCoordinator.off('task:progress', onProgress);
+          _agentCoordinator.off('task:completed', onCompleted);
+          _agentCoordinator.off('task:failed', onFailed);
+          broadcastEvent('agent', { runId, sessionKey, stream: 'lifecycle', data: { phase: 'end' } });
+          broadcastEvent('chat', {
+            runId, sessionKey,
+            state: 'final',
+            message: { content: [{ type: 'text', text: t.result || 'Task completed successfully.' }] },
+          });
+        }
+      };
+
+      const onFailed = (t: any, err: string) => {
+        if (t.id === task.id) {
+          _agentCoordinator.off('task:progress', onProgress);
+          _agentCoordinator.off('task:completed', onCompleted);
+          _agentCoordinator.off('task:failed', onFailed);
+          broadcastEvent('agent', { runId, sessionKey, stream: 'lifecycle', data: { phase: 'error', error: err || 'Task failed' } });
+          broadcastEvent('chat', { runId, sessionKey, state: 'error' });
+        }
+      };
+
+      _agentCoordinator.on('task:progress', onProgress);
+      _agentCoordinator.on('task:completed', onCompleted);
+      _agentCoordinator.on('task:failed', onFailed);
+      return;
+    }
+
     const errMsg = 'Hermes Agent not found. Set HERMES_PROJECT_PATH or place hermes-agent-main as sibling folder.';
     log.error(errMsg);
     broadcastEvent('agent', { runId, sessionKey, stream: 'lifecycle', data: { phase: 'error', error: errMsg } });
@@ -671,6 +730,8 @@ function handleChatAbort(state, id, params) {
     try { if (process.platform === "win32" && child.pid) { require("child_process").execSync(`taskkill /pid ${child.pid} /t /f`, { stdio: "ignore" }); } else { child.kill(); } } catch { /* process may already be dead */ }
     state.runningProcesses.delete(runId);
     log.info(`Aborted run ${runId}`);
+  } else if (runId && _agentCoordinator) {
+    try { _agentCoordinator.stopTask(runId); } catch {}
   }
 
   sendResponse(state, id, true, {});
@@ -1148,4 +1209,5 @@ export {
   getHermesProjectPath,
   getHermesPythonPath,
   setToolResultCallback,
+  setAgentCoordinator,
 };

@@ -10,6 +10,7 @@ export const AgentTownView: React.FC = () => {
   const [serverState, setServerState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
+  const [reloadCounter, setReloadCounter] = useState<number>(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const attemptsRef = useRef<number>(0);
 
@@ -43,10 +44,60 @@ export const AgentTownView: React.FC = () => {
     };
   }, [checkHealth]);
 
+  // Iframe event wiring matching reference build (tK)
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || serverState !== 'ready') return;
+
+    const handleLoad = () => {
+      console.log('[AgentTownEmbed] Iframe loaded successfully');
+      try {
+        iframe.contentWindow?.postMessage({ type: 'expand-state', isExpanded }, '*');
+      } catch {
+        // ignore cross-origin postMessage errors
+      }
+    };
+
+    const handleError = () => {
+      console.error('[AgentTownEmbed] Iframe failed to load');
+    };
+
+    iframe.addEventListener('load', handleLoad);
+    iframe.addEventListener('error', handleError);
+
+    return () => {
+      iframe.removeEventListener('load', handleLoad);
+      iframe.removeEventListener('error', handleError);
+    };
+  }, [serverState, reloadCounter, isExpanded]);
+
+  // Sync expanded state to iframe
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (iframe?.contentWindow) {
+      try {
+        iframe.contentWindow.postMessage({ type: 'expand-state', isExpanded }, '*');
+      } catch {
+        // ignore
+      }
+    }
+  }, [isExpanded]);
+
+  // Escape key to exit expanded state
+  useEffect(() => {
+    if (!isExpanded) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsExpanded(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isExpanded]);
+
   const handleRetry = () => {
     setServerState('loading');
     setErrorMessage('');
     attemptsRef.current = 0;
+    setReloadCounter((prev) => prev + 1);
     if ((window as any).electronAPI?.invoke) {
       (window as any).electronAPI.invoke('start-agent-town-server').catch(() => {});
     }
@@ -58,12 +109,23 @@ export const AgentTownView: React.FC = () => {
     <div
       id="agent-town-container"
       className="relative w-full h-full rounded-[2rem] border border-[rgba(0,229,255,0.18)] bg-[#0c101c] overflow-hidden flex flex-col shadow-[0_0_40px_rgba(0,229,255,0.08),inset_0_1px_0_rgba(0,229,255,0.05)] select-none transition-all duration-300"
-      style={isExpanded ? { position: 'fixed', top: '44px', left: 0, width: '100vw', height: 'calc(100vh - 44px)', zIndex: 9999, background: '#1b2740', borderRadius: 0 } : {}}
+      style={
+        isExpanded
+          ? {
+              position: 'fixed',
+              top: '44px',
+              left: 0,
+              width: '100vw',
+              height: 'calc(100vh - 44px)',
+              zIndex: 9999,
+              background: '#1b2740',
+              borderRadius: 0,
+            }
+          : {}
+      }
     >
       {/* ── Top Header Strip (Matching Legacy 'tK' exactly) ──────────────── */}
-      <div
-        className="flex items-center justify-between px-4 h-[44px] bg-gradient-to-r from-[rgba(6,11,15,0.95)] to-[rgba(9,17,26,0.95)] border-b border-[rgba(0,229,255,0.15)] z-10 shrink-0"
-      >
+      <div className="flex items-center justify-between px-4 h-[44px] bg-gradient-to-r from-[rgba(6,11,15,0.95)] to-[rgba(9,17,26,0.95)] border-b border-[rgba(0,229,255,0.15)] z-10 shrink-0">
         <div className="flex items-center space-x-2.5">
           <span
             className={`w-2 h-2 rounded-full transition-all duration-300 ${
@@ -119,27 +181,22 @@ export const AgentTownView: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Viewport: Live Agent Town Standalone iframe ───────────────────── */}
+      {/* ── Viewport: Only Mounts Iframe When Server Is Live (Prevents Caching ERR_CONNECTION_REFUSED) ───────────────────── */}
       <div className="relative flex-1 w-full h-[calc(100%-44px)] overflow-hidden bg-[#0a0e14]">
-        <iframe
-          ref={iframeRef}
-          src={AGENT_TOWN_URL}
-          className="w-full h-full border-none block"
-          style={{
-            imageRendering: 'pixelated',
-            background: '#1b2740',
-            display: serverState === 'error' ? 'none' : 'block',
-          }}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          title="Agent Town Simulation"
-          onLoad={() => {
-            console.log('[AgentTownEmbed] Iframe loaded successfully');
-            setServerState('ready');
-          }}
-          onError={() => {
-            console.warn('[AgentTownEmbed] Iframe failed to load');
-          }}
-        />
+        {serverState === 'ready' && (
+          <iframe
+            ref={iframeRef}
+            key={reloadCounter}
+            src={AGENT_TOWN_URL}
+            className="w-full h-full border-none block"
+            style={{
+              imageRendering: 'pixelated',
+              background: '#1b2740',
+            }}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            title="Agent Town Simulation"
+          />
+        )}
 
         {serverState === 'loading' && (
           <div className="absolute inset-0 z-20 w-full h-full flex flex-col items-center justify-center gap-4 bg-[#0a0e14]">

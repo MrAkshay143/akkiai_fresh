@@ -41,6 +41,275 @@ interface ChatSession {
   title: string;
   timestamp: number;
   messages: ChatMessage[];
+  chatMode?: 'voice' | 'expert';
+  agentId?: string;
+  agentName?: string;
+  sessionId?: string;
+}
+
+class HermesWsClient {
+  private ws: WebSocket | null = null;
+  private pending = new Map<string, { resolve: (val: any) => void; reject: (err: any) => void; timer: any }>();
+  private eventListeners = new Map<string, Set<(data: any) => void>>();
+  private statusListeners = new Set<(status: string) => void>();
+  private _status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'unreachable' = 'disconnected';
+  private url: string;
+  private token: string;
+  private connectReject: ((err: any) => void) | null = null;
+  private connectSettled = false;
+  private autoReconnect = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer: any = null;
+  private intentionalClose = false;
+
+  constructor(url: string = 'ws://127.0.0.1:18789/', token: string = '') {
+    this.url = url;
+    this.token = token;
+  }
+
+  get status() {
+    return this._status;
+  }
+
+  setStatus(status: 'disconnected' | 'connecting' | 'connected' | 'error' | 'unreachable') {
+    this._status = status;
+    this.statusListeners.forEach((fn) => fn(status));
+  }
+
+  onStatus(fn: (status: string) => void) {
+    this.statusListeners.add(fn);
+    return () => this.statusListeners.delete(fn);
+  }
+
+  on(event: string, fn: (data: any) => void) {
+    if (!this.eventListeners.has(event)) {
+      this.eventListeners.set(event, new Set());
+    }
+    this.eventListeners.get(event)!.add(fn);
+    return () => {
+      this.eventListeners.get(event)?.delete(fn);
+    };
+  }
+
+  connect() {
+    this.autoReconnect = true;
+    this.reconnectAttempt = 0;
+    this.intentionalClose = false;
+    return this.connectOnce();
+  }
+
+  connectOnce(): Promise<any> {
+    return new Promise((resolve, reject) => {
+      if (this.ws) {
+        try {
+          this.ws.close();
+        } catch {}
+        this.ws = null;
+      }
+      this.setStatus('connecting');
+      this.connectSettled = false;
+      this.connectReject = reject;
+      try {
+        const ws = new WebSocket(this.url);
+        this.ws = ws;
+
+        ws.onopen = () => {
+          this.sendConnectHandshake();
+        };
+
+        ws.onmessage = (evt) => {
+          let frame: any;
+          try {
+            frame = JSON.parse(typeof evt.data === 'string' ? evt.data : '{}');
+          } catch {
+            return;
+          }
+          this.handleFrame(frame, (res) => {
+            if (!this.connectSettled) {
+              this.connectSettled = true;
+              this.connectReject = null;
+              this.reconnectAttempt = 0;
+              resolve(res);
+            }
+          });
+        };
+
+        ws.onerror = () => {
+          if (this._status !== 'unreachable') {
+            this.setStatus('error');
+          }
+          this.rejectConnect(new Error('WebSocket connection error'));
+        };
+
+        ws.onclose = () => {
+          const wasConnected = this._status === 'connected';
+          if (this._status !== 'unreachable') {
+            this.setStatus('disconnected');
+          }
+          this.rejectConnect(new Error('Connection closed before handshake'));
+          this.clearPending();
+          if (!this.intentionalClose && this.autoReconnect) {
+            this.scheduleReconnect(wasConnected);
+          }
+        };
+      } catch (e) {
+        this.setStatus('error');
+        this.rejectConnect(e);
+      }
+    });
+  }
+
+  private scheduleReconnect(resetAttempt: boolean) {
+    if (this.reconnectTimer) return;
+    if (resetAttempt) this.reconnectAttempt = 0;
+    if (this.reconnectAttempt >= 5) {
+      this.autoReconnect = false;
+      this.setStatus('unreachable');
+      return;
+    }
+    const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
+    this.reconnectAttempt++;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.autoReconnect && !this.intentionalClose) {
+        this.connectOnce().catch(() => {});
+      }
+    }, delay);
+  }
+
+  private rejectConnect(err: any) {
+    if (!this.connectSettled) {
+      this.connectSettled = true;
+      this.connectReject?.(err);
+      this.connectReject = null;
+    }
+  }
+
+  private clearPending() {
+    for (const [id, req] of this.pending) {
+      req.reject(new Error('Connection closed'));
+      clearTimeout(req.timer);
+      this.pending.delete(id);
+    }
+  }
+
+  private handleFrame(frame: any, onConnected?: (res: any) => void) {
+    if (frame.type === 'event') {
+      if (frame.event === 'connect.challenge') {
+        this.sendConnectHandshake();
+        return;
+      }
+      if (frame.event) {
+        const listeners = this.eventListeners.get(frame.event);
+        listeners?.forEach((fn) => fn(frame.data));
+      }
+      const wildcard = this.eventListeners.get('*');
+      wildcard?.forEach((fn) => fn(frame));
+      return;
+    }
+
+    if (frame.type === 'res' && frame.id) {
+      const pending = this.pending.get(frame.id);
+      if (pending) {
+        clearTimeout(pending.timer);
+        this.pending.delete(frame.id);
+        if (frame.ok) {
+          if (frame.payload?.type === 'hello-ok') {
+            this.setStatus('connected');
+            onConnected?.(frame);
+          }
+          pending.resolve(frame);
+        } else {
+          pending.reject(new Error(frame.error?.message ?? 'Request failed'));
+        }
+        return;
+      }
+    }
+
+    if (frame.ok && frame.payload?.type === 'hello-ok') {
+      this.setStatus('connected');
+      onConnected?.(frame);
+      return;
+    }
+  }
+
+  private sendConnectHandshake() {
+    const reqId = 'aw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    const msg = {
+      type: 'req',
+      id: reqId,
+      method: 'connect',
+      params: {
+        minProtocol: 3,
+        maxProtocol: 3,
+        client: {
+          id: 'gateway-client',
+          displayName: 'Agent Town',
+          version: '1.0.0',
+          platform: 'web',
+          mode: 'backend',
+          instanceId: 'aw-' + Date.now(),
+        },
+        auth: { token: this.token },
+        role: 'operator',
+        scopes: ['operator.read', 'operator.write', 'operator.admin'],
+        locale: 'en-US',
+      },
+    };
+    const timer = setTimeout(() => {
+      this.pending.delete(reqId);
+      this.setStatus('unreachable');
+      this.rejectConnect(new Error('Handshake timeout (15s)'));
+    }, 15000);
+
+    this.pending.set(reqId, {
+      resolve: () => {},
+      reject: (err) => {
+        this.autoReconnect = false;
+        this.setStatus('unreachable');
+        this.rejectConnect(err);
+      },
+      timer,
+    });
+    try {
+      this.ws?.send(JSON.stringify(msg));
+    } catch {}
+  }
+
+  async request(method: string, params: any, timeout = 30000): Promise<any> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new Error('Not connected to Hermes Bridge');
+    }
+    const reqId = 'aw_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(reqId);
+        reject(new Error('Timeout: ' + method));
+      }, timeout);
+      this.pending.set(reqId, { resolve, reject, timer });
+      const req = { type: 'req', id: reqId, method, params };
+      this.ws?.send(JSON.stringify(req));
+    });
+  }
+
+  disconnect() {
+    this.intentionalClose = true;
+    this.autoReconnect = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.connectSettled = true;
+    this.connectReject = null;
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+    this.clearPending();
+    this.setStatus('disconnected');
+  }
 }
 
 export const ChatDrawer: React.FC = () => {
@@ -61,12 +330,22 @@ export const ChatDrawer: React.FC = () => {
   const { playClick, playAction } = useAudio();
 
   const [viewMode, setViewMode] = useState<'messages' | 'history'>('messages');
+  const [activeMode, setActiveMode] = useState<'voice' | 'expert'>(() => {
+    const saved = localStorage.getItem('akki_chat_mode');
+    return saved === 'expert' || saved === 'hermes' ? 'expert' : 'voice';
+  });
+
   const [sessions, setSessions] = useState<ChatSession[]>(() => {
     try {
       const saved = localStorage.getItem('akki_chat_sessions');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((s) => ({
+            ...s,
+            chatMode: s.chatMode || 'voice',
+          }));
+        }
       }
     } catch {}
     return [
@@ -75,19 +354,29 @@ export const ChatDrawer: React.FC = () => {
         title: 'New Session',
         timestamp: Date.now(),
         messages: [],
+        chatMode: 'voice',
       },
     ];
   });
+
   const [activeChatId, setActiveChatId] = useState<string>(() => {
-    return localStorage.getItem('akki_active_chat_id') || 'session-default';
+    const isExpert =
+      localStorage.getItem('akki_chat_mode') === 'expert' ||
+      localStorage.getItem('akki_chat_mode') === 'hermes';
+    const key = isExpert ? 'akki_active_hermes_chat_id' : 'akki_active_voice_chat_id';
+    return localStorage.getItem(key) || localStorage.getItem('akki_active_chat_id') || 'session-default';
   });
 
   const [inputPrompt, setInputPrompt] = useState('');
-  const [activeMode, setActiveMode] = useState<'voice' | 'expert'>('voice');
   const [thinkingEnabled] = useState(true);
   const [expandedThinking, setExpandedThinking] = useState<Record<string, boolean>>({});
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+
+  // Hermes WebSocket Bridge & Task tracking
+  const wsClientRef = useRef<HermesWsClient | null>(null);
+  const [wsStatus, setWsStatus] = useState<string>('disconnected');
+  const currentRunIdRef = useRef<string | null>(null);
 
   // Logs state
   const [logs, setLogs] = useState<LogEntry[]>([
@@ -114,13 +403,27 @@ export const ChatDrawer: React.FC = () => {
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
+  // Initial load of messages for active session
+  useEffect(() => {
+    if (!activeChatId) return;
+    const current = sessions.find((s) => s.id === activeChatId);
+    if (current && Array.isArray(current.messages) && current.messages.length > 0) {
+      setMessages(current.messages);
+    }
+  }, []);
+
   // Sync sessions with localStorage
   useEffect(() => {
     try {
       localStorage.setItem('akki_chat_sessions', JSON.stringify(sessions));
       localStorage.setItem('akki_active_chat_id', activeChatId);
+      if (activeMode === 'expert') {
+        localStorage.setItem('akki_active_hermes_chat_id', activeChatId);
+      } else {
+        localStorage.setItem('akki_active_voice_chat_id', activeChatId);
+      }
     } catch {}
-  }, [sessions, activeChatId]);
+  }, [sessions, activeChatId, activeMode]);
 
   // Keep active session messages in sync when store messages change
   useEffect(() => {
@@ -195,20 +498,299 @@ export const ChatDrawer: React.FC = () => {
     }
   }, []);
 
+  // Connect Hermes WebSocket Client (Port 18789)
+  useEffect(() => {
+    const client = new HermesWsClient('ws://127.0.0.1:18789/', '');
+    wsClientRef.current = client;
+
+    const unsubStatus = client.onStatus((status) => {
+      setWsStatus(status);
+    });
+
+    const unsubAgent = client.on('agent', (sI: any) => {
+      if (!sI) return;
+      if (currentRunIdRef.current && sI.runId && sI.runId !== currentRunIdRef.current) return;
+
+      if (sI.stream === 'assistant') {
+        const delta = sI.data?.delta;
+        if (!delta) return;
+        setMessages((prev) => {
+          const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+          if (lastIdx === -1) return prev;
+          const actualIdx = prev.length - 1 - lastIdx;
+          const target = prev[actualIdx];
+          const updated = [...prev];
+          updated[actualIdx] = {
+            ...target,
+            content: (target.content || '') + delta,
+            thinking: target.thinking === 'Thinking...' ? undefined : target.thinking,
+          };
+          return updated;
+        });
+      } else if (sI.stream === 'reasoning') {
+        const reasoning = sI.data?.text || '';
+        if (!reasoning) return;
+        setMessages((prev) => {
+          const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+          if (lastIdx === -1) return prev;
+          const actualIdx = prev.length - 1 - lastIdx;
+          const target = prev[actualIdx];
+          const updated = [...prev];
+          updated[actualIdx] = {
+            ...target,
+            thinking:
+              target.thinking && target.thinking !== 'Thinking...'
+                ? target.thinking + '\n' + reasoning
+                : reasoning,
+          };
+          return updated;
+        });
+      } else if (sI.stream === 'tool_start') {
+        const toolName = sI.data?.name || 'tool';
+        const toolId = sI.data?.id ? `tool-${sI.data.id}` : `tool-${Date.now()}`;
+        const newTool: ToolExecutionSummary = {
+          id: toolId,
+          toolName,
+          executionTimeSec: 0,
+          status: 'running',
+          inputs: sI.data?.args,
+        };
+        setMessages((prev) => {
+          const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+          if (lastIdx === -1) return prev;
+          const actualIdx = prev.length - 1 - lastIdx;
+          const target = prev[actualIdx];
+          const updated = [...prev];
+          updated[actualIdx] = {
+            ...target,
+            toolCalls: [...(target.toolCalls || []), newTool],
+          };
+          return updated;
+        });
+        setLogs((prev) => [
+          ...prev,
+          {
+            id: `log-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            level: 'tool',
+            message: `Tool Started: ${toolName}`,
+            details: JSON.stringify(sI.data?.args || {}),
+          },
+        ]);
+      } else if (sI.stream === 'tool_end') {
+        const toolName = sI.data?.name || 'tool';
+        const toolId = sI.data?.id ? `tool-${sI.data.id}` : null;
+        const isOk = sI.data?.ok !== false;
+        const output = sI.data?.output;
+
+        setMessages((prev) => {
+          const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+          if (lastIdx === -1) return prev;
+          const actualIdx = prev.length - 1 - lastIdx;
+          const target = prev[actualIdx];
+          const tools = [...(target.toolCalls || [])];
+          let toolIdx = toolId ? tools.findIndex((t) => t.id === toolId) : -1;
+          if (toolIdx === -1) {
+            toolIdx = tools.map((t) => t.status).lastIndexOf('running');
+          }
+          if (toolIdx !== -1) {
+            tools[toolIdx] = {
+              ...tools[toolIdx],
+              status: isOk ? 'success' : 'error',
+              output,
+            };
+          } else {
+            tools.push({
+              id: toolId || `tool-${Date.now()}`,
+              toolName,
+              executionTimeSec: 0,
+              status: isOk ? 'success' : 'error',
+              output,
+            });
+          }
+          const updated = [...prev];
+          updated[actualIdx] = {
+            ...target,
+            toolCalls: tools,
+          };
+          return updated;
+        });
+        setLogs((prev) => [
+          ...prev,
+          {
+            id: `log-${Date.now()}`,
+            timestamp: new Date().toLocaleTimeString(),
+            level: 'tool',
+            message: `Tool Finished: ${toolName} (${isOk ? 'OK' : 'FAIL'})`,
+            details: typeof output === 'string' ? output : JSON.stringify(output || {}),
+          },
+        ]);
+      } else if (sI.stream === 'status') {
+        const statusText = sI.data?.text || '';
+        if (statusText) {
+          setLogs((prev) => [
+            ...prev,
+            {
+              id: `log-${Date.now()}`,
+              timestamp: new Date().toLocaleTimeString(),
+              level: 'agent',
+              message: statusText,
+            },
+          ]);
+        }
+      } else if (sI.stream === 'lifecycle') {
+        if (sI.data?.phase === 'error') {
+          const errText = sI.data?.error || 'Unknown error';
+          setIsStreaming(false);
+          setMessages((prev) => {
+            const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+            if (lastIdx === -1) return prev;
+            const actualIdx = prev.length - 1 - lastIdx;
+            const target = prev[actualIdx];
+            const updated = [...prev];
+            updated[actualIdx] = {
+              ...target,
+              content: (target.content || '') + `\n\nError: ${errText}`,
+            };
+            return updated;
+          });
+        } else if (sI.data?.phase === 'end') {
+          setIsStreaming(false);
+        }
+      }
+    });
+
+    const unsubChat = client.on('chat', (sI: any) => {
+      if (!sI) return;
+      if (currentRunIdRef.current && sI.runId && sI.runId !== currentRunIdRef.current) return;
+
+      if (sI.state === 'final') {
+        setIsStreaming(false);
+        const finalText = sI.message?.content?.[0]?.text;
+        if (finalText) {
+          setMessages((prev) => {
+            const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+            if (lastIdx === -1) return prev;
+            const actualIdx = prev.length - 1 - lastIdx;
+            const target = prev[actualIdx];
+            if (!target.content) {
+              const updated = [...prev];
+              updated[actualIdx] = {
+                ...target,
+                content: finalText,
+              };
+              return updated;
+            }
+            return prev;
+          });
+        }
+      } else if (sI.state === 'error' || sI.state === 'aborted') {
+        setIsStreaming(false);
+      }
+    });
+
+    client.connect().catch((err) => {
+      console.warn('[Hermes Chat Client] Connection attempt failed:', err);
+    });
+
+    return () => {
+      unsubStatus();
+      unsubAgent();
+      unsubChat();
+      client.disconnect();
+    };
+  }, [setMessages, setIsStreaming]);
+
+  // Switch Mode handler
+  const switchMode = useCallback(
+    (targetMode: 'voice' | 'expert') => {
+      if (targetMode === activeMode) return;
+      playClick();
+
+      // 1. Save current active chat ID for current mode
+      if (activeMode === 'voice') {
+        localStorage.setItem('akki_active_voice_chat_id', activeChatId);
+      } else {
+        localStorage.setItem('akki_active_hermes_chat_id', activeChatId);
+      }
+
+      setActiveMode(targetMode);
+      localStorage.setItem('akki_chat_mode', targetMode === 'expert' ? 'hermes' : 'voice');
+
+      setLogs((prev) => [
+        ...prev,
+        {
+          id: `log-${Date.now()}`,
+          timestamp: new Date().toLocaleTimeString(),
+          level: 'info',
+          message: `Chat Mode switched to ${targetMode === 'expert' ? 'Expert Agent' : 'Voice Assistant'}`,
+        },
+      ]);
+
+      // 2. Find target chat ID for target mode
+      const targetKey =
+        targetMode === 'expert' ? 'akki_active_hermes_chat_id' : 'akki_active_voice_chat_id';
+      let targetId = localStorage.getItem(targetKey);
+
+      let found = sessions.find((s) => s.id === targetId && (s.chatMode || 'voice') === targetMode);
+      if (!found) {
+        const candidate = sessions
+          .filter((s) => (s.chatMode || 'voice') === targetMode)
+          .sort((a, b) => b.timestamp - a.timestamp)[0];
+        if (candidate) {
+          found = candidate;
+          targetId = candidate.id;
+        } else {
+          const newSession: ChatSession = {
+            id: `session-${Date.now()}`,
+            title: 'New Session',
+            timestamp: Date.now(),
+            messages: [],
+            chatMode: targetMode,
+          };
+          setSessions((prev) => [newSession, ...prev]);
+          found = newSession;
+          targetId = newSession.id;
+        }
+      }
+
+      if (targetId && found) {
+        setActiveChatId(targetId);
+        localStorage.setItem('akki_active_chat_id', targetId);
+        localStorage.setItem(targetKey, targetId);
+        setMessages(found.messages || []);
+        setViewMode('messages');
+      }
+    },
+    [activeMode, activeChatId, sessions, setMessages, playClick]
+  );
+
   // New Chat Session handler
   const handleNewChat = useCallback(() => {
+    const activeAgent = subAgents.find((a) => a.name === selectedAgent);
     const newId = `session-${Date.now()}`;
     const newSession: ChatSession = {
       id: newId,
       title: 'New Session',
       timestamp: Date.now(),
       messages: [],
+      chatMode: activeMode,
+      agentId: activeAgent?.name,
+      agentName: activeAgent?.name,
+      sessionId: activeAgent ? `agent:${activeAgent.name}:t-${Date.now()}` : undefined,
     };
     setSessions((prev) => [newSession, ...prev]);
     setActiveChatId(newId);
+    localStorage.setItem('akki_active_chat_id', newId);
+    if (activeMode === 'voice') {
+      localStorage.setItem('akki_active_voice_chat_id', newId);
+    } else {
+      localStorage.setItem('akki_active_hermes_chat_id', newId);
+    }
     clearMessages();
+    setInputPrompt('');
     setViewMode('messages');
-  }, [clearMessages]);
+  }, [activeMode, selectedAgent, subAgents, clearMessages]);
 
   // Switch Chat Session handler
   const handleSwitchChat = useCallback(
@@ -216,6 +798,15 @@ export const ChatDrawer: React.FC = () => {
       const target = sessions.find((s) => s.id === chatId);
       if (target) {
         setActiveChatId(chatId);
+        localStorage.setItem('akki_active_chat_id', chatId);
+        const mode = target.chatMode || 'voice';
+        setActiveMode(mode);
+        localStorage.setItem('akki_chat_mode', mode === 'expert' ? 'hermes' : 'voice');
+        if (mode === 'voice') {
+          localStorage.setItem('akki_active_voice_chat_id', chatId);
+        } else {
+          localStorage.setItem('akki_active_hermes_chat_id', chatId);
+        }
         setMessages(target.messages || []);
         setViewMode('messages');
       }
@@ -234,20 +825,36 @@ export const ChatDrawer: React.FC = () => {
             title: 'New Session',
             timestamp: Date.now(),
             messages: [],
+            chatMode: activeMode,
           };
           setActiveChatId(fallback.id);
+          localStorage.setItem('akki_active_chat_id', fallback.id);
+          if (activeMode === 'voice') {
+            localStorage.setItem('akki_active_voice_chat_id', fallback.id);
+          } else {
+            localStorage.setItem('akki_active_hermes_chat_id', fallback.id);
+          }
           clearMessages();
           return [fallback];
         }
         if (chatId === activeChatId) {
-          const nextActive = filtered[0];
-          setActiveChatId(nextActive.id);
-          setMessages(nextActive.messages || []);
+          const nextForMode =
+            filtered.find((s) => (s.chatMode || 'voice') === activeMode) || filtered[0];
+          setActiveChatId(nextForMode.id);
+          localStorage.setItem('akki_active_chat_id', nextForMode.id);
+          const mode = nextForMode.chatMode || 'voice';
+          setActiveMode(mode);
+          if (mode === 'voice') {
+            localStorage.setItem('akki_active_voice_chat_id', nextForMode.id);
+          } else {
+            localStorage.setItem('akki_active_hermes_chat_id', nextForMode.id);
+          }
+          setMessages(nextForMode.messages || []);
         }
         return filtered;
       });
     },
-    [activeChatId, clearMessages, setMessages]
+    [activeChatId, activeMode, clearMessages, setMessages]
   );
 
   // Attachment handling
@@ -304,8 +911,34 @@ export const ChatDrawer: React.FC = () => {
     if (isStreaming) {
       // Halt streaming
       setIsStreaming(false);
-      if ((window as any).electronAPI?.invoke) {
-        (window as any).electronAPI.invoke('ai-stop').catch(() => {});
+      if (activeMode === 'expert') {
+        if (currentRunIdRef.current) {
+          wsClientRef.current
+            ?.request('chat.abort', { runId: currentRunIdRef.current, sessionKey: 'default' })
+            .catch(() => {});
+          if ((window as any).electronAPI?.stopAgentTask) {
+            (window as any).electronAPI.stopAgentTask(currentRunIdRef.current).catch(() => {});
+          }
+        }
+        setMessages((prev) => {
+          const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
+          if (lastIdx === -1) return prev;
+          const actualIdx = prev.length - 1 - lastIdx;
+          const target = prev[actualIdx];
+          const updated = [...prev];
+          updated[actualIdx] = {
+            ...target,
+            thinking: target.thinking ? target.thinking + '\n[Stopped by user]' : '[Stopped by user]',
+          };
+          return updated;
+        });
+      } else {
+        if ((window as any).electronAPI?.cancelStream) {
+          (window as any).electronAPI.cancelStream().catch(() => {});
+        }
+        if ((window as any).electronAPI?.invoke) {
+          (window as any).electronAPI.invoke('ai-stop').catch(() => {});
+        }
       }
       return;
     }
@@ -319,8 +952,9 @@ export const ChatDrawer: React.FC = () => {
     playAction();
 
     // 1. Add user message
+    const userMsgId = `user-msg-${Date.now()}`;
     const userMsg: ChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: userMsgId,
       sender: 'user',
       avatarType: 'user',
       content: userText || (currentAttachments.length > 0 ? `Shared ${currentAttachments.length} file(s)` : ''),
@@ -330,7 +964,130 @@ export const ChatDrawer: React.FC = () => {
     addMessage(userMsg);
     setIsStreaming(true);
 
-    // Append to logs
+    if (activeMode === 'expert') {
+      // 2. Expert Agent Mode
+      const assistantMsgId = `hermes-msg-${Date.now()}`;
+      const assistantMsg: ChatMessage = {
+        id: assistantMsgId,
+        sender: 'assistant',
+        avatarType: selectedAgent ? 'akki' : 'robot',
+        thinking: 'Thinking...',
+        content: '',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      addMessage(assistantMsg);
+
+      setLogs((prev) => [
+        ...prev,
+        {
+          id: `log-${Date.now()}`,
+          timestamp: new Date().toLocaleTimeString(),
+          level: 'agent',
+          message: `Expert Agent Task assigned: "${userText.slice(0, 40)}..."`,
+        },
+      ]);
+
+      currentRunIdRef.current = null;
+      const targetAgent = subAgents.find((a) => a.name === selectedAgent);
+
+      // Build memory context
+      let memoryContext = '';
+      try {
+        const storedProfile = localStorage.getItem('user_profile');
+        const profile = storedProfile ? JSON.parse(storedProfile) : null;
+        const storedMems = localStorage.getItem('akki_memories');
+        const mems = storedMems ? JSON.parse(storedMems) : null;
+        if (profile || (Array.isArray(mems) && mems.length > 0)) {
+          const name = profile?.name || '';
+          const loc = profile?.location || '';
+          const prof = profile?.profession || '';
+          const bio = profile?.bio || '';
+          const profText = `Name: ${name}\nLocation: ${loc}\nProfession: ${prof}\nBio: ${bio}`;
+          const memText =
+            Array.isArray(mems) && mems.length > 0
+              ? mems.map((m: any) => `- ${m.content || m.fact || ''}`).join('\n')
+              : 'No stored memories.';
+          memoryContext = `=== VOICE ASSISTANT MEMORY CONTEXT ===\nUser Profile:\n${profText}\n\nStored Memories:\n${memText}\n======================================\n\n`;
+        }
+      } catch {}
+
+      const fullMessage = memoryContext + userText;
+      const currentSession = sessions.find((s) => s.id === activeChatId);
+      const sessionKey = currentSession?.sessionId ?? activeChatId;
+
+      try {
+        if (wsClientRef.current && wsClientRef.current.status === 'connected') {
+          const res = await wsClientRef.current.request('chat.send', {
+            sessionKey,
+            message: fullMessage,
+            idempotencyKey: userMsgId,
+            ...(targetAgent ? { seatLabel: targetAgent.name, seatRole: targetAgent.role } : {}),
+          });
+          if (res.payload?.runId) {
+            currentRunIdRef.current = res.payload.runId;
+          }
+        } else {
+          // Fallback: assign via Electron IPC
+          if ((window as any).electronAPI?.assignAgentTask) {
+            const task = await (window as any).electronAPI.assignAgentTask({
+              agentName: targetAgent?.name || 'Leo',
+              title: userText.slice(0, 50),
+              description: fullMessage,
+            });
+            if (task) {
+              currentRunIdRef.current = task.id;
+              if (task.result) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: task.result || '', thinking: undefined } : m
+                  )
+                );
+                setIsStreaming(false);
+              }
+            }
+          } else {
+            throw new Error('Hermes Bridge is not connected (Port 18789)');
+          }
+        }
+      } catch (err: any) {
+        console.error('Expert chat send error:', err);
+        let handledByFallback = false;
+        if ((window as any).electronAPI?.assignAgentTask) {
+          try {
+            const task = await (window as any).electronAPI.assignAgentTask({
+              agentName: targetAgent?.name || 'Leo',
+              title: userText.slice(0, 50),
+              description: fullMessage,
+            });
+            if (task) {
+              currentRunIdRef.current = task.id;
+              if (task.result) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsgId ? { ...m, content: task.result || '', thinking: undefined } : m
+                  )
+                );
+                setIsStreaming(false);
+              }
+              handledByFallback = true;
+            }
+          } catch {}
+        }
+        if (!handledByFallback) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === assistantMsgId
+                ? { ...m, content: `Failed to invoke Expert Agent: ${err.message}`, thinking: undefined }
+                : m
+            )
+          );
+          setIsStreaming(false);
+        }
+      }
+      return;
+    }
+
+    // 3. Voice Assistant Mode
     setLogs((prev) => [
       ...prev,
       {
@@ -566,7 +1323,7 @@ export const ChatDrawer: React.FC = () => {
               </div>
 
               <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
-                {sessions.length === 0 ? (
+                {sessions.filter((s) => (s.chatMode || 'voice') === activeMode).length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 bg-white/[0.02] border border-white/5 rounded-3xl">
                     <MessageSquare size={24} className="mb-4 text-white/20" />
                     <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-white/20">
@@ -574,7 +1331,9 @@ export const ChatDrawer: React.FC = () => {
                     </span>
                   </div>
                 ) : (
-                  sessions.map((session) => (
+                  sessions
+                    .filter((s) => (s.chatMode || 'voice') === activeMode)
+                    .map((session) => (
                     <div
                       key={session.id}
                       className={`group relative py-5 px-5 rounded-2xl transition-all duration-300 cursor-pointer flex items-center justify-between gap-4 border ${
@@ -982,8 +1741,7 @@ export const ChatDrawer: React.FC = () => {
             <div className="flex items-center bg-black/40 border border-white/5 rounded-full p-0.5 shadow-inner">
               <button
                 onClick={() => {
-                  playClick();
-                  setActiveMode('voice');
+                  switchMode('voice');
                 }}
                 className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${
                   activeMode === 'voice'
@@ -997,8 +1755,7 @@ export const ChatDrawer: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  playClick();
-                  setActiveMode('expert');
+                  switchMode('expert');
                 }}
                 className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wider transition-all flex items-center gap-1.5 ${
                   activeMode === 'expert'
@@ -1016,11 +1773,23 @@ export const ChatDrawer: React.FC = () => {
               <div
                 className={`w-1.5 h-1.5 rounded-full ${
                   activeMode === 'expert'
-                    ? 'bg-indigo-400 animate-pulse shadow-[0_0_6px_rgba(129,140,248,0.4)]'
+                    ? wsStatus === 'connected'
+                      ? 'bg-indigo-400 animate-pulse shadow-[0_0_6px_rgba(129,140,248,0.4)]'
+                      : wsStatus === 'connecting'
+                      ? 'bg-amber-400 animate-pulse shadow-[0_0_6px_rgba(251,191,36,0.4)]'
+                      : 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.4)]'
                     : 'bg-j-cyan animate-pulse shadow-[0_0_6px_rgba(0,229,255,0.4)]'
                 }`}
               />
-              <span>{activeMode === 'expert' ? 'Expert Agent Active' : 'Live Connected'}</span>
+              <span>
+                {activeMode === 'expert'
+                  ? wsStatus === 'connected'
+                    ? 'Expert Agent Active'
+                    : wsStatus === 'connecting'
+                    ? 'Connecting Bridge...'
+                    : 'Expert Agent Offline'
+                  : 'Live Connected'}
+              </span>
             </div>
           </div>
 

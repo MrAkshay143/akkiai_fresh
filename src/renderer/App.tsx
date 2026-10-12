@@ -31,10 +31,28 @@ export const App: React.FC = () => {
     setIsAuthenticated,
     activeVideoId,
     setActiveVideoId,
+    rightWidth,
+    isResizingRight,
+    setRightWidth,
+    setIsResizingRight,
     assistantStatus,
     setAssistantStatus,
     setCompanionSpeech,
   } = useAppStore();
+
+  const [windowWidth, setWindowWidth] = React.useState(window.innerWidth);
+
+  useEffect(() => {
+    const handleResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const currentRightWidth = React.useMemo(() => {
+    if (isResizingRight) return rightWidth;
+    const available = windowWidth - 800;
+    return available >= rightWidth ? rightWidth : Math.max(0, Math.min(available, rightWidth));
+  }, [windowWidth, rightWidth, isResizingRight]);
 
   // ── Global Keyboard Shortcuts ─────────────────────────────────────────
   useEffect(() => {
@@ -252,7 +270,10 @@ export const App: React.FC = () => {
           </section>
 
           {/* ── Right Column: Chats / Logs Drawer (Exact Legacy AK) ─────────────── */}
-          <aside className="hidden md:flex w-[380px] 2xl:w-[410px] h-full shrink-0 flex-col relative">
+          <aside
+            style={{ width: currentRightWidth }}
+            className="hidden md:flex relative flex-col transition-all duration-100 bg-transparent min-w-[200px] max-w-[510px] shrink-0 h-full"
+          >
             <ChatDrawer />
           </aside>
         </main>
