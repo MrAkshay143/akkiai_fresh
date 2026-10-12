@@ -1,0 +1,248 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 0 0 0;
+  --foreground: 225 248 255;
+  --j-cyan: #00e5ff;
+  --j-blue: #0085ff;
+  --j-void: #020406;
+  --j-panel: #0b141b;
+  --j-surface: #111e28;
+  --j-steel: #1e2d38;
+  --j-text-primary: #e1f8ff;
+  --j-text-secondary: #8ba7b0;
+  --j-text-muted: #4b636b;
+  --panel-border: rgba(0, 229, 255, 0.1);
+
+  --bg-primary: #020406;
+  --bg-secondary: #0b141b;
+  --bg-tertiary: #111e28;
+  --bg-card: rgba(11, 20, 27, 0.85);
+  --bg-card-hover: rgba(17, 30, 40, 0.9);
+
+  --border-dim: rgba(0, 229, 255, 0.12);
+  --border-neon-purple: rgba(0, 133, 255, 0.55);
+  --border-neon-cyan: rgba(0, 229, 255, 0.55);
+  --border-neon-pink: rgba(247, 37, 133, 0.55);
+
+  --accent-cyan: #00e5ff;
+  --accent-purple: #0085ff;
+  --accent-violet: #7c3aed;
+  --accent-pink: #f72585;
+  --accent-emerald: #10b981;
+  --accent-amber: #f59e0b;
+
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-dim: #6b7280;
+
+  --glow-cyan: 0 0 16px rgba(0, 229, 255, 0.35);
+  --glow-purple: 0 0 16px rgba(0, 133, 255, 0.4);
+  --glow-pink: 0 0 16px rgba(247, 37, 133, 0.35);
+}
+
+/* ── 5 Legacy Cyberpunk Themes (theme-engine.js THEME_REGISTRY) ── */
+[data-theme="akki"], :root:not([data-theme]) {
+  --bg-primary: #020406;
+  --bg-secondary: #0b141b;
+  --bg-tertiary: #111e28;
+  --bg-card: #0b141b;
+  --accent-cyan: #00e5ff;
+  --accent-purple: #0085ff;
+  --border-neon-purple: rgba(0, 133, 255, 0.55);
+  --border-neon-cyan: rgba(0, 229, 255, 0.55);
+  --glow-theme: 0 0 18px rgba(0, 229, 255, 0.35);
+  --j-cyan: #00e5ff;
+  --j-blue: #0085ff;
+  --j-panel: #0b141b;
+  --j-surface: #111e28;
+  --j-void: #020406;
+  --j-steel: #1e2d38;
+}
+
+[data-theme="violet-void"] {
+  --bg-primary: #06020a;
+  --bg-secondary: #12061c;
+  --bg-tertiary: #1b0a29;
+  --bg-card: #12061c;
+  --accent-cyan: #a822ff;
+  --accent-purple: #d800ff;
+  --border-neon-purple: rgba(216, 0, 255, 0.6);
+  --border-neon-cyan: rgba(168, 34, 255, 0.6);
+  --glow-theme: 0 0 18px rgba(168, 34, 255, 0.45);
+  --j-cyan: #a822ff;
+  --j-blue: #d800ff;
+  --j-panel: #12061c;
+  --j-surface: #1b0a29;
+  --j-void: #06020a;
+  --j-steel: #230d36;
+}
+
+[data-theme="solar-amber"] {
+  --bg-primary: #0a0401;
+  --bg-secondary: #1c0b03;
+  --bg-tertiary: #2a1105;
+  --bg-card: #1c0b03;
+  --accent-cyan: #ff5500;
+  --accent-purple: #ff9100;
+  --border-neon-purple: rgba(255, 145, 0, 0.6);
+  --border-neon-cyan: rgba(255, 85, 0, 0.6);
+  --glow-theme: 0 0 18px rgba(255, 85, 0, 0.45);
+  --j-cyan: #ff5500;
+  --j-blue: #ff9100;
+  --j-panel: #1c0b03;
+  --j-surface: #2a1105;
+  --j-void: #0a0401;
+  --j-steel: #381707;
+}
+
+[data-theme="electric-cyan"] {
+  --bg-primary: #020912;
+  --bg-secondary: #051424;
+  --bg-tertiary: #082038;
+  --bg-card: #051424;
+  --accent-cyan: #00d2ff;
+  --accent-purple: #0077ff;
+  --border-neon-purple: rgba(0, 119, 255, 0.6);
+  --border-neon-cyan: rgba(0, 210, 255, 0.6);
+  --glow-theme: 0 0 18px rgba(0, 210, 255, 0.45);
+  --j-cyan: #00d2ff;
+  --j-blue: #0077ff;
+  --j-panel: #051424;
+  --j-surface: #082038;
+  --j-void: #020912;
+  --j-steel: #0d2c4e;
+}
+
+[data-theme="crimson-neon"] {
+  --bg-primary: #080103;
+  --bg-secondary: #1c0308;
+  --bg-tertiary: #2b060e;
+  --bg-card: #1c0308;
+  --accent-cyan: #ff003c;
+  --accent-purple: #ff3355;
+  --border-neon-purple: rgba(255, 51, 85, 0.6);
+  --border-neon-cyan: rgba(255, 0, 60, 0.6);
+  --glow-theme: 0 0 18px rgba(255, 0, 60, 0.45);
+  --j-cyan: #ff003c;
+  --j-blue: #ff3355;
+  --j-panel: #1c0308;
+  --j-surface: #2b060e;
+  --j-void: #080103;
+  --j-steel: #380710;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "ss02", "cv01", "cv02";
+}
+
+/* Custom Cyberpunk Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: #020406;
+}
+::-webkit-scrollbar-thumb {
+  background: #1e2d38;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--j-cyan, #00e5ff);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--j-cyan, #00e5ff);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Glass Card */
+.glass-panel {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-dim);
+  border-radius: 12px;
+}
+
+.glass-panel-glow {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-neon-purple);
+  box-shadow: 0 0 18px rgba(124, 58, 237, 0.15);
+  border-radius: 12px;
+}
+
+/* Pulse animation for glowing status */
+@keyframes neon-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+    box-shadow: 0 0 8px currentColor;
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.96);
+    box-shadow: 0 0 3px currentColor;
+  }
+}
+
+.pulse-glow {
+  animation: neon-pulse 2.2s infinite ease-in-out;
+}
+
+/* Scanline Overlay (Subtle Cyberpunk effect) */
+.scanlines {
+  background: linear-gradient(
+    rgba(18, 16, 38, 0) 50%, 
+    rgba(0, 0, 0, 0.25) 50%
+  ), linear-gradient(
+    90deg,
+    rgba(255, 0, 0, 0.02),
+    rgba(0, 255, 0, 0.01),
+    rgba(0, 0, 255, 0.02)
+  );
+  background-size: 100% 3px, 6px 100%;
+}
+
+.bg-hex-grid {
+  background-image: linear-gradient(30deg,#000000 12%,transparent 12.5%,transparent 87%,#000000 87.5%,#000000),linear-gradient(150deg,#000000 12%,transparent 12.5%,transparent 87%,#000000 87.5%,#000000),linear-gradient(30deg,#000000 12%,transparent 12.5%,transparent 87%,#000000 87.5%,#000000),linear-gradient(150deg,#000000 12%,transparent 12.5%,transparent 87%,#000000 87.5%,#000000),linear-gradient(60deg,#030508 25%,transparent 25.5%,transparent 75%,#030508 75%,#030508),linear-gradient(60deg,#030508 25%,transparent 25.5%,transparent 75%,#030508 75%,#030508);
+  background-size: 80px 140px;
+  background-position: 0 0,0 0,40px 70px,40px 70px,0 0,40px 70px;
+}
+
+.bg-scan-line {
+  background: linear-gradient(to bottom,transparent 50%,rgba(0,229,255,.02) 50%);
+  background-size: 100% 4px;
+}
+

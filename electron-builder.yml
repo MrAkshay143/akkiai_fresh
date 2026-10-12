@@ -1,0 +1,29 @@
+appId: com.akki.ai.desktop
+productName: Akki Ai
+copyright: Copyright © 2026 Akshay Mondal
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - package.json
+  - "!**/*.test.*"
+  - "!**/test/**"
+  - "!**/*.map"
+extraResources:
+  - from: resources/agent-town
+    to: agent-town
+  - from: resources/audio
+    to: audio
+  - from: resources/branding
+    to: branding
+win:
+  target:
+    - portable
+  icon: resources/branding/logo.png
+portable:
+  artifactName: "${productName}-${version}-Portable.${ext}"
+  requestExecutionLevel: user
+npmRebuild: false
+nodeGypRebuild: false

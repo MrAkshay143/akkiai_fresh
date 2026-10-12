@@ -1,0 +1,3 @@
+module.exports=[30730,a=>{a.v({className:"press_start_2p_33b5f155-module__XhJY7W__className",variable:"press_start_2p_33b5f155-module__XhJY7W__variable"})},33290,a=>{"use strict";var b=a.i(72537),c=a.i(30730);let d={className:c.default.className,style:{fontFamily:"'Press Start 2P', 'Press Start 2P Fallback'",fontWeight:400,fontStyle:"normal"}};function e({children:a}){return(0,b.jsx)("html",{lang:"en",className:`dark ${d.variable}`,children:(0,b.jsx)("body",{children:a})})}null!=c.default.variable&&(d.variable=c.default.variable),a.s(["default",()=>e,"metadata",0,{title:"Agent Town",description:"A pixel office where AI agents work"}],33290)}];
+
+//# sourceMappingURL=%5Broot-of-the-server%5D__5c98201d._.js.map

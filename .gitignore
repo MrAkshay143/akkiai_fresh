@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Production builds & packaging
+dist/
+dist-electron/
+release/
+out/
+build/
+
+# Secret credentials & keys (keep private locally)
+.env
+secret_key.json
+firebase.json
+firebase_config.json
+*.bin
+
+# Local cache & logs
+*.local
+*.log
+.DS_Store
+Thumbs.db
