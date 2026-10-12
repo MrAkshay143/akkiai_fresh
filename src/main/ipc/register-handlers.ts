@@ -270,11 +270,15 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   // ── 5. Tools Execution ──────────────────────────────────────────────────────
   ipcMain.handle(
     IPC_CHANNELS.TOOLS_EXECUTE,
-    async (_event, args: { toolName: string; params: Record<string, unknown> }) => {
-      const parsed = ToolExecuteSchema.safeParse(args);
+    async (_event, rawArgs: any) => {
+      const normalized = {
+        toolName: rawArgs?.toolName,
+        params: rawArgs?.params ?? rawArgs?.args ?? {},
+      };
+      const parsed = ToolExecuteSchema.safeParse(normalized);
       if (!parsed.success) {
         return {
-          toolName: args?.toolName || 'unknown',
+          toolName: rawArgs?.toolName || 'unknown',
           status: 'error',
           error: `Invalid tool parameters: ${parsed.error.message}`,
         };
@@ -1966,10 +1970,61 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   });
   ipcMain.handle('license-passed', () => isEffectiveLicensed());
 
-  ipcMain.handle('onboarding-get-data', () => ({}));
+  const getUserProfilePath = () => path.join(app.getPath('userData'), 'user_profile.json');
+
+  const updateUserProfile = (patch: Record<string, any>) => {
+    try {
+      const p = getUserProfilePath();
+      let current: Record<string, any> = {};
+      if (fs.existsSync(p)) {
+        try {
+          current = JSON.parse(fs.readFileSync(p, 'utf-8'));
+        } catch (_) {}
+      }
+      const updated = { ...current, ...patch, updatedAt: Date.now() };
+      fs.writeFileSync(p, JSON.stringify(updated, null, 2), 'utf-8');
+      return updated;
+    } catch (e) {
+      console.error('[IPC] Failed to persist user_profile.json:', e);
+      return null;
+    }
+  };
+
+  ipcMain.handle('save-user-profile', async (_event, profile: Record<string, any>) => {
+    const updated = updateUserProfile(profile || {});
+    return { success: !!updated, profile: updated };
+  });
+
+  ipcMain.handle('get-user-profile', async () => {
+    try {
+      const p = getUserProfilePath();
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, 'utf-8'));
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  });
+
+  ipcMain.handle('onboarding-get-data', () => {
+    try {
+      const p = getUserProfilePath();
+      if (fs.existsSync(p)) {
+        return JSON.parse(fs.readFileSync(p, 'utf-8'));
+      }
+    } catch (_) {}
+    return {};
+  });
   ipcMain.handle('onboarding-get-mode', () => 'standard');
-  ipcMain.handle('onboarding-save-age', () => true);
-  ipcMain.handle('onboarding-save-name', () => true);
+  ipcMain.handle('onboarding-save-age', (_event, age) => {
+    updateUserProfile({ age });
+    return true;
+  });
+  ipcMain.handle('onboarding-save-name', (_event, name) => {
+    updateUserProfile({ name });
+    return true;
+  });
   ipcMain.handle('onboarding-sign-in', () => true);
   ipcMain.handle('splash-transition-complete', () => true);
 

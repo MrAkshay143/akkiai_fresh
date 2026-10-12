@@ -104,6 +104,8 @@ export interface ElectronAPI {
 
   // Generic invoker
   invoke: <T = unknown>(channel: string, ...args: unknown[]) => Promise<T>;
+  saveUserProfile?: (profile: { name: string; age?: string | number }) => Promise<any>;
+  getUserProfile?: () => Promise<any>;
 
   // Skills
   skillsList: () => Promise<any[]>;
@@ -272,6 +274,9 @@ export const electronAPI: ElectronAPI = {
   notifyAppReady: () => ipcRenderer.invoke('splash-transition-complete'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  saveUserProfile: (profile: { name: string; age?: string | number }) =>
+    ipcRenderer.invoke('save-user-profile', profile),
+  getUserProfile: () => ipcRenderer.invoke('get-user-profile'),
   send: (channel: string, ...args: unknown[]) => ipcRenderer.send(channel, ...args),
   on: (channel: string, callback: (...args: any[]) => void) => {
     const subscription = (_event: Electron.IpcRendererEvent, ...args: any[]) => callback(...args);
