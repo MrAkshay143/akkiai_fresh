@@ -49,6 +49,13 @@ import {
 import { authCredentialStore } from '../services/auth/auth-credential-store';
 import { browserManager } from '../services/tools/browser-manager';
 import { registerDesktopHandlers } from '../services/tools/desktop-manager';
+import {
+  getAutoUpdateEnabled,
+  setAutoUpdateEnabled,
+  checkForUpdates,
+  downloadUpdate,
+  installUpdate,
+} from '../services/auto-updater';
 
 export interface IpcContext {
   tasksStore: LocalStore<TaskItem[]>;
@@ -1896,28 +1903,14 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     ctx.genericStore.update(c => ({ ...c, voice_provider: val }));
     return true;
   });
-  ipcMain.handle('get-auto-update-enabled', () => {
-    try {
-      const p = getUserDataPath('auto_update_settings.json');
-      if (fs.existsSync(p)) {
-        const d = JSON.parse(fs.readFileSync(p, 'utf8'));
-        return d?.enabled !== false;
-      }
-    } catch {}
-    return true;
-  });
+  ipcMain.handle('get-auto-update-enabled', () => getAutoUpdateEnabled());
   ipcMain.handle('save-auto-update-enabled', (_event, enabledOrObj: any) => {
-    try {
-      const enabled = typeof enabledOrObj === 'object' ? (enabledOrObj?.enabled !== false) : (enabledOrObj !== false);
-      const p = getUserDataPath('auto_update_settings.json');
-      fs.writeFileSync(p, JSON.stringify({ enabled, updatedAt: Date.now() }, null, 2), 'utf8');
-      return true;
-    } catch {}
-    return false;
+    const enabled = typeof enabledOrObj === 'object' ? (enabledOrObj?.enabled !== false) : (enabledOrObj !== false);
+    return setAutoUpdateEnabled(enabled);
   });
-  ipcMain.handle('check-for-updates', () => ({ updateAvailable: false }));
-  ipcMain.handle('download-update', () => true);
-  ipcMain.handle('install-update', () => true);
+  ipcMain.handle('check-for-updates', () => checkForUpdates(getMainWindow));
+  ipcMain.handle('download-update', () => downloadUpdate());
+  ipcMain.handle('install-update', () => installUpdate(getMainWindow));
 
   ipcMain.handle('load-chats', () => ctx.chatsStore.get());
   ipcMain.handle('save-chats', (_event, chats: any) => {

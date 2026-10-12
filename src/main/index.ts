@@ -26,6 +26,7 @@ import * as hermesBridgeService from './services/agents/hermes-bridge-service';
 import { registerIpcHandlers } from './ipc/register-handlers';
 import { SkillsService } from './services/skills/skills-service';
 import { firebaseService } from './services/auth/firebase-service';
+import { setupAutoUpdater } from './services/auto-updater';
 import type {
   TaskItem,
   NoteItem,
@@ -229,6 +230,7 @@ if (!gotTheLock) {
 
     // 4. Initialize Primary Electron Window
     createMainWindow();
+    setupAutoUpdater({ getMainWindow });
 
     // 5. Start Agent Town Standalone Server (Phaser 3 simulation on port 3000)
     startAgentTownServer(3000)
