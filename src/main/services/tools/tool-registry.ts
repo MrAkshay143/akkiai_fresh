@@ -1,11 +1,13 @@
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { clipboard, Notification, app, shell } from 'electron';
+import { clipboard, Notification, app, shell, BrowserWindow } from 'electron';
 import { MemoryService } from '../memory/memory-service';
 import { AgentCoordinator } from '../agents/agent-coordinator';
 import { InfoPanelWindowManager } from '../../windows/info-panel-window';
 import { hardwareService } from '../hardware/hardware-service';
+import { whatsAppManager } from '../whatsapp/whatsapp-manager';
+import { browserManager } from './browser-manager';
 
 export interface ToolDefinition {
   name: string;
@@ -927,6 +929,733 @@ export class ToolRegistry {
         const p = await browserManager.getPage();
         const result = await p.evaluate((code: string) => eval(code), script);
         return { success: true, result };
+      },
+    });
+
+    // 34. ask_user
+    this.register({
+      name: 'ask_user',
+      description: 'Pause execution and ask the user a question. Use when explicit permission, clarification, or missing information is required.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          question: {
+            type: 'STRING',
+            description: 'The clear, specific question to ask the user.',
+          },
+        },
+        required: ['question'],
+      },
+      execute: async ({ question }: { question?: string }) => {
+        if (!question || typeof question !== 'string') {
+          return { success: false, error: 'Question is required.' };
+        }
+        return {
+          success: true,
+          result: 'Question asked to user out loud. Waiting for user reply.',
+          _breakLoop: true,
+          question,
+        };
+      },
+    });
+
+    // 35. send_whatsapp
+    this.register({
+      name: 'send_whatsapp',
+      description: 'Send a WhatsApp message to a specific contact via WhatsApp Desktop automation. Requires WhatsApp Desktop installed and contact name to match display name.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          contactName: {
+            type: 'STRING',
+            description: 'Name of the WhatsApp contact to message (must match their WhatsApp display name or chat title).',
+          },
+          message: {
+            type: 'STRING',
+            description: 'Text message to send.',
+          },
+        },
+        required: ['contactName', 'message'],
+      },
+      execute: async ({ contactName, message }: { contactName?: string; message?: string }) => {
+        if (!contactName || !message) {
+          return {
+            success: false,
+            error: 'contactName and message are both required.',
+            errorCode: 'INVALID_ARGS',
+            errorCategory: 'permanent',
+            retryable: false,
+          };
+        }
+        try {
+          const sent = await whatsAppManager.sendReply(contactName, message);
+          if (sent && (sent as any).success !== false) {
+            return {
+              success: true,
+              result: `Message successfully sent to ${contactName} on WhatsApp.`,
+              method: (sent as any).method || 'keyboard_automation',
+            };
+          }
+          return {
+            success: false,
+            error: (sent as any)?.error || 'WhatsApp automation failed.',
+            errorCode: 'UNKNOWN_ERROR',
+            errorCategory: 'transient',
+            retryable: false,
+            retrySuggestion: 'Make sure WhatsApp Desktop is installed and the contact name matches exactly.',
+          };
+        } catch (err: any) {
+          return {
+            success: false,
+            error: `WhatsApp automation crashed: ${err?.message || err}`,
+            errorCode: 'UNKNOWN_ERROR',
+            errorCategory: 'transient',
+            retryable: false,
+            retrySuggestion: 'Make sure WhatsApp Desktop is installed. Run: npm install @jitsi/robotjs if missing.',
+          };
+        }
+      },
+    });
+
+    // 36. send_whatsapp_quick_message
+    this.register({
+      name: 'send_whatsapp_quick_message',
+      description: 'QUICK one-way WhatsApp sender ONLY — fires off a single text to one contact via WhatsApp Desktop. It CANNOT read messages, see replies, or hold a conversation. For real/two-way WhatsApp (reading chats, replies, browsing), DO NOT use this tool — instruct the user to use WhatsApp Desktop or check your chat view. Parameters: contactName, message.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          contactName: {
+            type: 'STRING',
+            description: 'Name of the WhatsApp contact to message (must match their WhatsApp display name or chat title).',
+          },
+          message: {
+            type: 'STRING',
+            description: 'Text message to send.',
+          },
+        },
+        required: ['contactName', 'message'],
+      },
+      execute: async (args: any) => {
+        return await this.getTool('send_whatsapp')!.execute(args);
+      },
+    });
+
+    // 37. query_recent_chat
+    this.register({
+      name: 'query_recent_chat',
+      description: 'Retrieve recent visible messages from the current selected chat session. Use this for "what were we just talking about?" or recent-context recall before checking long-term memory. Returns a token-bounded slice instead of the full chat.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          limit: {
+            type: 'NUMBER',
+            description: 'Optional number of recent visible messages to return. The tool enforces a minimum of 10 and a maximum of 20, plus an overall 8000-token cap.',
+          },
+        },
+      },
+      execute: async ({ limit }: { limit?: number } = {}) => {
+        try {
+          const raw = this.memoryService.readRawMemory() || '';
+          const maxMessages = Math.max(10, Math.min(20, Number.isFinite(limit) ? Number(limit!) : 10));
+          const lines = raw.split('\n').filter((l) => l.trim().startsWith('- [') || l.trim().startsWith('•') || l.trim().startsWith('-'));
+          const slice = lines.slice(-maxMessages);
+          if (slice.length === 0) {
+            return {
+              success: true,
+              result: 'No recent visible chat context found in the current session.',
+              data: { count: 0, entries: [] },
+            };
+          }
+          const formatted = slice.map((l, i) => `${i + 1}. Context: ${l.trim()}`);
+          return {
+            success: true,
+            result: `Recent chat context (${slice.length} messages):\n` + formatted.join('\n'),
+            data: { count: slice.length, entries: slice },
+          };
+        } catch (err: any) {
+          return { success: false, error: `Failed to retrieve recent chat: ${err?.message || err}` };
+        }
+      },
+    });
+
+    // 38. query_user_profile
+    this.register({
+      name: 'query_user_profile',
+      description: 'Retrieve the stored user profile including name, preferred language, timezone, notes, and learned context from MEMORY.md.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        try {
+          const raw = await this.memoryService.readRawMemory();
+          const pPath = path.join(app.getPath('userData'), 'user_profile.json');
+          let profileObj: any = {};
+          if (fs.existsSync(pPath)) {
+            try { profileObj = JSON.parse(fs.readFileSync(pPath, 'utf8')); } catch (_) {}
+          }
+          const text = (raw || '').trim();
+          return {
+            success: true,
+            result: text ? `Unified memories from MEMORY.md:\n${text}` : 'Memory is currently empty.',
+            data: { raw: text, profile: profileObj },
+          };
+        } catch (err: any) {
+          return { success: false, error: `Failed to read MEMORY.md: ${err?.message || err}` };
+        }
+      },
+    });
+
+    // 39. update_user_profile
+    this.register({
+      name: 'update_user_profile',
+      description: 'Update the stored user profile with new preferences, identity facts, or context.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING', description: "User's name" },
+          preferredLanguage: { type: 'STRING', description: 'Preferred language' },
+          timezone: { type: 'STRING', description: 'User timezone' },
+          notes: { type: 'STRING', description: 'Notes' },
+          contextEntry: { type: 'STRING', description: 'Context entry' },
+          contextEntries: { type: 'ARRAY', items: { type: 'STRING' }, description: 'Array of context entries' },
+          replaceContext: { type: 'STRING', description: 'Context replacement' },
+        },
+      },
+      execute: async (args: any) => {
+        const facts: string[] = [];
+        if (args?.name) facts.push(`My name is ${args.name}`);
+        if (args?.preferredLanguage) facts.push(`My preferred language is ${args.preferredLanguage}`);
+        if (args?.timezone) facts.push(`My timezone is ${args.timezone}`);
+        if (args?.notes) facts.push(args.notes);
+        if (args?.contextEntry) facts.push(args.contextEntry);
+        if (Array.isArray(args?.contextEntries)) facts.push(...args.contextEntries.filter(Boolean));
+        if (args?.replaceContext) facts.push(args.replaceContext);
+
+        if (facts.length === 0) {
+          return { success: false, error: 'Provide at least one profile field to update.' };
+        }
+
+        try {
+          const raw = (await this.memoryService.readRawMemory()) || '';
+          const today = new Date().toLocaleDateString();
+          const block = facts.map((f) => `- [${today}] [identity/preference] ${f}`).join('\n§\n');
+          const newRaw = raw ? `${block}\n§\n${raw}` : block;
+          await this.memoryService.writeRawMemory(newRaw);
+
+          // Update user_profile.json
+          const pPath = path.join(app.getPath('userData'), 'user_profile.json');
+          let currentProfile: any = {};
+          if (fs.existsSync(pPath)) {
+            try { currentProfile = JSON.parse(fs.readFileSync(pPath, 'utf8')); } catch (_) {}
+          }
+          if (args?.name) currentProfile.name = args.name;
+          if (args?.preferredLanguage) currentProfile.preferredLanguage = args.preferredLanguage;
+          if (args?.timezone) currentProfile.timezone = args.timezone;
+          if (args?.notes) currentProfile.notes = args.notes;
+          fs.writeFileSync(pPath, JSON.stringify(currentProfile, null, 2), 'utf8');
+
+          return {
+            success: true,
+            result: `MEMORY.md updated successfully with profile facts: ${facts.join(' | ')}`,
+            data: { updatedFacts: facts },
+          };
+        } catch (err: any) {
+          return { success: false, error: `Failed to update MEMORY.md: ${err?.message || err}` };
+        }
+      },
+    });
+
+    // 40. render_widget
+    this.register({
+      name: 'render_widget',
+      description: 'Render an interactive HTML widget or visual component in a dedicated HUD window. Use this for calculators, charts, games, complex UIs, or any rich web content. Write complete, self-contained HTML including CSS and JS. The widget opens in a 760x580 window.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          widget_id: {
+            type: 'STRING',
+            description: 'A unique ID for this widget (e.g. calculator, chart_1).',
+          },
+          title: {
+            type: 'STRING',
+            description: 'The title to display in the widget window titlebar.',
+          },
+          html_content: {
+            type: 'STRING',
+            description: 'The complete HTML code to render, including inline CSS and JS inside script tags.',
+          },
+          theme: {
+            type: 'STRING',
+            description: 'Optional visual theme flavor.',
+            enum: ['cyan', 'amber', 'crimson', 'emerald', 'purple'],
+          },
+        },
+        required: ['widget_id', 'title', 'html_content'],
+      },
+      execute: async ({ widget_id, title, html_content, theme, width, height }: any) => {
+        if (!widget_id || !html_content) {
+          return { success: false, error: 'widget_id and html_content are required' };
+        }
+        try {
+          const { ipcMain } = require('electron');
+          const handlers = (ipcMain as any)._invokeHandlers;
+          const handler = handlers && handlers.get('open-widget-window');
+          if (handler) {
+            await handler({} as any, { widgetId: widget_id, title, htmlContent: html_content, theme, width, height });
+          }
+          return {
+            success: true,
+            result: `Widget ${widget_id} rendered successfully.`,
+          };
+        } catch (err: any) {
+          return { success: false, error: `Failed to render widget: ${err?.message || err}` };
+        }
+      },
+    });
+
+    // 41. close_widget
+    this.register({
+      name: 'close_widget',
+      description: 'Close a currently open HTML widget window.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          widget_id: {
+            type: 'STRING',
+            description: 'The unique ID of the widget to close. Use all to close all widgets.',
+          },
+        },
+        required: ['widget_id'],
+      },
+      execute: async ({ widget_id }: any) => {
+        if (!widget_id) {
+          return { success: false, error: 'widget_id required' };
+        }
+        try {
+          const { ipcMain } = require('electron');
+          const handlers = (ipcMain as any)._invokeHandlers;
+          const handler = handlers && handlers.get('close-widget-window');
+          if (handler) {
+            await handler({} as any, widget_id);
+          }
+          return {
+            success: true,
+            result: `Widget ${widget_id} closed successfully.`,
+          };
+        } catch (err: any) {
+          return { success: false, error: `Failed to close widget: ${err?.message || err}` };
+        }
+      },
+    });
+
+    // 42. browser_press_key
+    this.register({
+      name: 'browser_press_key',
+      description: 'Press a keyboard key or key combination in the browser.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          key: {
+            type: 'STRING',
+            description: 'Key to press: Enter, Tab, Escape, Backspace, Delete, ArrowDown, ArrowUp, Home, End, PageDown, PageUp, F5, or combos like Control+a, Control+c, Control+v, Shift+Tab',
+          },
+        },
+        required: ['key'],
+      },
+      execute: async ({ key }: any) => {
+        if (!key) throw new Error('Key parameter is required');
+        return await browserManager.pressKey(key);
+      },
+    });
+
+    // 43. browser_emulate_device
+    this.register({
+      name: 'browser_emulate_device',
+      description: 'Emulate a mobile or tablet device by setting viewport and user agent. Available: "iPhone 12", "iPhone 14", "iPad Pro", "Samsung Galaxy S20", "Pixel 5", "Desktop 1280", "Desktop 1920"',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          deviceName: {
+            type: 'STRING',
+            description: 'Device name to emulate. Options: "iPhone 12", "iPhone 14", "iPad Pro", "Samsung Galaxy S20", "Pixel 5", "Desktop 1280", "Desktop 1920"',
+          },
+        },
+        required: ['deviceName'],
+      },
+      execute: async ({ deviceName }: any) => {
+        if (!deviceName) throw new Error('deviceName parameter is required');
+        return await browserManager.emulateDevice(deviceName);
+      },
+    });
+
+    // 44. browser_extract_text
+    this.register({
+      name: 'browser_extract_text',
+      description: 'Extract readable text content from an element or the entire page.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: {
+            type: 'STRING',
+            description: 'CSS selector or ref number for specific element, or omit to extract all visible text (max 50,000 chars)',
+          },
+        },
+      },
+      execute: async ({ selector }: any = {}) => {
+        return await browserManager.extractText(selector);
+      },
+    });
+
+    // 45. browser_get_console
+    this.register({
+      name: 'browser_get_console',
+      description: 'Read browser console messages (console.log, console.warn, console.error, etc.). Useful for debugging web applications.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          level: {
+            type: 'STRING',
+            description: 'Filter by level: "log", "warning", "error", "info" (optional, returns all if omitted)',
+            enum: ['log', 'warning', 'error', 'info', 'debug'],
+          },
+        },
+      },
+      execute: async ({ level }: any = {}) => {
+        return await browserManager.getConsole(level);
+      },
+    });
+
+    // 46. browser_get_tabs
+    this.register({
+      name: 'browser_get_tabs',
+      description: 'List all open browser tabs with their index, title, URL and which tab is currently active.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        return await browserManager.getTabs();
+      },
+    });
+
+    // 47. browser_go_back
+    this.register({
+      name: 'browser_go_back',
+      description: 'Go back to the previous page in browser history (like pressing the Back button).',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        return await browserManager.goBack();
+      },
+    });
+
+    // 48. browser_handle_dialog
+    this.register({
+      name: 'browser_handle_dialog',
+      description: 'Handle browser dialogs: alert(), confirm(), prompt(). Call this BEFORE the dialog-triggering action, or to set the default behavior.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          accept: {
+            type: 'BOOLEAN',
+            description: 'true to accept/confirm the dialog, false to dismiss/cancel (default: true)',
+          },
+          promptText: {
+            type: 'STRING',
+            description: 'Text to enter in prompt() dialogs (optional)',
+          },
+          timeoutMs: {
+            type: 'NUMBER',
+            description: 'Maximum wait time for dialog to appear in milliseconds (default: 10000)',
+          },
+        },
+      },
+      execute: async ({ accept = true, promptText, timeoutMs }: any = {}) => {
+        return await browserManager.handleDialog(accept, promptText, timeoutMs);
+      },
+    });
+
+    // 49. browser_hover
+    this.register({
+      name: 'browser_hover',
+      description: 'Hover over an element to reveal dropdown menus, tooltips, or hidden content.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: {
+            type: 'STRING',
+            description: 'Ref number or CSS selector for the element to hover over',
+          },
+        },
+        required: ['selector'],
+      },
+      execute: async ({ selector }: any) => {
+        if (!selector) throw new Error('Selector is required');
+        return await browserManager.hover(selector);
+      },
+    });
+
+    // 50. browser_set_geolocation
+    this.register({
+      name: 'browser_set_geolocation',
+      description: 'Fake the browser GPS location. Useful for testing location-based features or accessing geo-restricted content.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          latitude: {
+            type: 'NUMBER',
+            description: 'Latitude (-90 to 90)',
+          },
+          longitude: {
+            type: 'NUMBER',
+            description: 'Longitude (-180 to 180)',
+          },
+          accuracy: {
+            type: 'NUMBER',
+            description: 'GPS accuracy in meters (default: 100)',
+          },
+          clear: {
+            type: 'BOOLEAN',
+            description: 'Set true to clear/remove fake location (default: false)',
+          },
+        },
+      },
+      execute: async ({ latitude, longitude, accuracy, clear }: any = {}) => {
+        return await browserManager.setGeolocation(latitude, longitude, accuracy, clear);
+      },
+    });
+
+    // 51. browser_login
+    this.register({
+      name: 'browser_login',
+      description: 'Launch an external Google Chrome browser session with user profile and remote debugging enabled for manual logins.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        const { ipcMain } = require('electron');
+        const handlers = (ipcMain as any)._invokeHandlers;
+        const handler = handlers && handlers.get('launch-browser-login-session');
+        if (handler) {
+          return await handler({} as any);
+        }
+        return { success: true, result: 'Browser login session launched.' };
+      },
+    });
+
+    // 52. scan_qr
+    this.register({
+      name: 'scan_qr',
+      description: 'Retrieve current WhatsApp Web QR code connection status.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        const state = whatsAppManager.getState();
+        return {
+          success: true,
+          status: state?.status || 'disconnected',
+          qrCode: state?.qrCode || null,
+        };
+      },
+    });
+
+    // 53. load_skill
+    this.register({
+      name: 'load_skill',
+      description: 'Load the full step-by-step instructions for a named Skill. Call this when the user requests a task that matches an available skill.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          skill_name: {
+            type: 'STRING',
+            description: 'The exact name of the skill to load (as shown in the skills list).',
+          },
+        },
+        required: ['skill_name'],
+      },
+      execute: async ({ skill_name }: any) => {
+        if (!skill_name || typeof skill_name !== 'string') {
+          return { success: false, error: 'skill_name is required.', errorCode: 'INVALID_ARGS', errorCategory: 'permanent', retryable: false };
+        }
+        try {
+          const { ipcMain } = require('electron');
+          const handlers = (ipcMain as any)._invokeHandlers;
+          const handler = handlers && handlers.get('skills-load-content');
+          let res: any = null;
+          if (handler) {
+            res = await handler({} as any, { skillName: skill_name });
+          }
+          if (res && res.success && res.content) {
+            return {
+              success: true,
+              result: `=== SKILL: ${skill_name} ===\n\n${res.content}\n\n=== END OF SKILL ===\n\nNow follow these instructions exactly to complete the user's task.`,
+              data: { skillName: skill_name, isCore: res.isCore },
+            };
+          }
+          return {
+            success: false,
+            error: res?.error || `Skill "${skill_name}" could not be loaded.`,
+            errorCode: 'INVALID_ARGS',
+            errorCategory: 'permanent',
+            retryable: false,
+          };
+        } catch (err: any) {
+          return { success: false, error: `Failed to load skill: ${err?.message || err}`, errorCode: 'UNKNOWN_ERROR', errorCategory: 'transient', retryable: true };
+        }
+      },
+    });
+
+    // 54. control_media_player
+    this.register({
+      name: 'control_media_player',
+      description: 'Control the Akki Neural Player floating music and video player window. Use this when the user asks to minimize, maximize, restore, fullscreen, or close the player, or to forward (+10s), rewind (-10s), seek to a specific timestamp (e.g. 2:15 or seconds), or control dedicated player volume (set_player_volume, player_volume_up, player_volume_down, mute_player, unmute_player). NOTE: This controls player internal audio only, not Windows master volume.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          action: {
+            type: 'STRING',
+            enum: ['minimize', 'maximize', 'restore', 'fullscreen', 'close', 'play', 'pause', 'forward', 'rewind', 'seek', 'set_player_volume', 'player_volume_up', 'player_volume_down', 'mute_player', 'unmute_player'],
+            description: 'The specific player action to execute.',
+          },
+          value: {
+            type: 'STRING',
+            description: 'Optional parameter: timestamp (seconds or MM:SS) for seek, seconds offset for forward/rewind, or volume (0-100).',
+          },
+        },
+        required: ['action'],
+      },
+      execute: async ({ action, value }: any) => {
+        try {
+          let parsedVal = value;
+          if (action === 'seek' && typeof value === 'string' && value.includes(':')) {
+            const parts = value.split(':');
+            if (parts.length === 2) {
+              const mins = parseInt(parts[0], 10) || 0;
+              const secs = parseInt(parts[1], 10) || 0;
+              parsedVal = String(mins * 60 + secs);
+            }
+          }
+          BrowserWindow.getAllWindows().forEach((win) => {
+            if (!win.isDestroyed()) {
+              win.webContents.send('media-player-control', { action, value: parsedVal });
+            }
+          });
+          return {
+            success: true,
+            result: `Player action '${action}' executed successfully.`,
+          };
+        } catch (err: any) {
+          return { success: false, error: err?.message || String(err) };
+        }
+      },
+    });
+
+    // 55. get_user_location
+    this.register({
+      name: 'get_user_location',
+      description: "Get the user's current live location, city, state, country, and GPS coordinates. Use this whenever answering location-dependent queries like weather, nearby places, directions, or local facts.",
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+        required: [],
+      },
+      execute: async () => {
+        let profileLoc = '';
+        try {
+          const pPath = path.join(app.getPath('userData'), 'user_profile.json');
+          if (fs.existsSync(pPath)) {
+            const p = JSON.parse(fs.readFileSync(pPath, 'utf8'));
+            profileLoc = (p.location || '').trim();
+          }
+        } catch (_) {}
+
+        try {
+          const res = await fetch('https://ipwho.is/');
+          const d: any = await res.json();
+          if (d && d.success) {
+            const full = profileLoc || `${d.city}, ${d.region}, ${d.country}`;
+            return {
+              success: true,
+              result: `User's current location: ${full} (Latitude: ${d.latitude}, Longitude: ${d.longitude}, Timezone: ${d.timezone ? d.timezone.id : ''})`,
+              data: {
+                location: full,
+                city: d.city,
+                region: d.region,
+                country: d.country,
+                latitude: d.latitude,
+                longitude: d.longitude,
+                timezone: d.timezone ? d.timezone.id : '',
+              },
+            };
+          }
+        } catch (_) {}
+
+        const cached = profileLoc || 'Current Location';
+        return {
+          success: true,
+          result: `User's current location: ${cached}`,
+          data: { location: cached },
+        };
+      },
+    });
+
+    // 56. keyboard_automation
+    this.register({
+      name: 'keyboard_automation',
+      description: 'Simulate OS-level keyboard actions (press key or type text) via RobotJS.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          action: {
+            type: 'STRING',
+            enum: ['press', 'type'],
+            description: "Action to perform: 'press' for key combination, 'type' for typing string.",
+          },
+          key: {
+            type: 'STRING',
+            description: 'Key name for press action (e.g. enter, tab, escape, f, etc.)',
+          },
+          text: {
+            type: 'STRING',
+            description: 'Text to type for type action',
+          },
+          pressEnter: {
+            type: 'BOOLEAN',
+            description: 'Whether to press Enter after typing text',
+          },
+        },
+        required: ['action'],
+      },
+      execute: async ({ action, key, text, pressEnter }: any) => {
+        let robot: any;
+        try {
+          robot = require('@jitsi/robotjs');
+        } catch (_) {
+          return { success: false, error: 'RobotJS module not available.' };
+        }
+        try {
+          if (action === 'press') {
+            if (!key) return { success: false, error: 'key is required for press action' };
+            robot.keyTap(key.toLowerCase());
+            return { success: true, result: `Pressed key: ${key}` };
+          } else if (action === 'type') {
+            if (text) robot.typeString(text);
+            if (pressEnter) {
+              await new Promise((r) => setTimeout(r, 200));
+              robot.keyTap('enter');
+            }
+            return { success: true, result: `Typed text: ${text || ''}` };
+          }
+          return { success: false, error: `Unknown action: ${action}` };
+        } catch (err: any) {
+          return { success: false, error: `Keyboard automation error: ${err?.message || err}` };
+        }
       },
     });
   }

@@ -998,7 +998,9 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('browser-upload-file', async () => ({ success: true }));
   ipcMain.handle('browser-wait-download', async () => ({ success: true }));
   ipcMain.handle('browser-download-by-click', async () => ({ success: true }));
-  ipcMain.handle('browser-handle-dialog', async () => ({ success: true }));
+  ipcMain.handle('browser-handle-dialog', async (_event, opts: any) => {
+    return await getBrowser().handleDialog(opts?.accept, opts?.promptText, opts?.timeoutMs);
+  });
   ipcMain.handle('browser-save-pdf', async () => ({ success: true }));
   ipcMain.handle('browser-get-cookies', async () => []);
   ipcMain.handle('browser-set-cookie', async () => true);
@@ -1013,15 +1015,23 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       return { success: true };
     } catch (e: any) { return { error: e.message }; }
   });
-  ipcMain.handle('browser-emulate-device', async () => ({ success: true }));
+  ipcMain.handle('browser-emulate-device', async (_event, { deviceName }: any = {}) => {
+    return await getBrowser().emulateDevice(deviceName || 'iPhone 14');
+  });
   ipcMain.handle('browser-emulate-color-scheme', async () => ({ success: true }));
   ipcMain.handle('browser-set-offline', async () => ({ success: true }));
   ipcMain.handle('browser-set-extra-headers', async () => ({ success: true }));
   ipcMain.handle('browser-set-http-credentials', async () => ({ success: true }));
-  ipcMain.handle('browser-set-geolocation', async () => ({ success: true }));
-  ipcMain.handle('browser-get-console', async () => []);
+  ipcMain.handle('browser-set-geolocation', async (_event, opts: any) => {
+    return await getBrowser().setGeolocation(opts?.latitude, opts?.longitude, opts?.accuracy, opts?.clear);
+  });
+  ipcMain.handle('browser-get-console', async (_event, { level }: any = {}) => {
+    return await getBrowser().getConsole(level);
+  });
   ipcMain.handle('browser-get-errors', async () => []);
-  ipcMain.handle('browser-get-tabs', async () => [{ id: 'tab-1', active: true }]);
+  ipcMain.handle('browser-get-tabs', async () => {
+    return await getBrowser().getTabs();
+  });
   ipcMain.handle('browser-switch-tab', async () => ({ success: true }));
   ipcMain.handle('browser-new-tab', async (_event, { url }: any) => {
     if (url) return await getBrowser().navigate(url);
@@ -1605,8 +1615,389 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   });
   ipcMain.handle('close-info-panel', (_event, panelId?: string) => ctx.infoPanelManager.closePanel(panelId || 'market_summary'));
   ipcMain.handle('get-info-panel-data', (_event, panelId?: string) => ctx.infoPanelManager.getPanelData(panelId || 'market_summary'));
-  ipcMain.handle('open-widget-window', async () => ({ success: true, id: 'widget-main' }));
-  ipcMain.handle('close-widget-window', () => true);
+  const widgetWindows = new Map<string, BrowserWindow>();
+
+  ipcMain.handle(
+    'open-widget-window',
+    async (_event, { widgetId, title, htmlContent, width, height, theme }: any = {}) => {
+      if (!widgetId || !htmlContent) {
+        throw new Error('widgetId and htmlContent are required');
+      }
+
+      // Auto-close any previous widget windows so multiple windows do not clutter the desktop (Single Active Widget)
+      widgetWindows.forEach((win) => {
+        if (win && !win.isDestroyed()) {
+          win.close();
+        }
+      });
+      widgetWindows.clear();
+
+      const offset = (widgetWindows.size % 5) * 30;
+      const winWidth = width ? Math.min(Math.max(width, 320), 1400) : 760;
+      const winHeight = height ? Math.min(Math.max(height, 240), 1000) : 580;
+
+      const widgetWin = new BrowserWindow({
+        width: winWidth,
+        height: winHeight,
+        x: 120 + offset,
+        y: 90 + offset,
+        frame: false,
+        transparent: true,
+        backgroundColor: '#00000000',
+        alwaysOnTop: true,
+        resizable: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          sandbox: true,
+          webSecurity: true,
+          devTools: false,
+        },
+      });
+
+      widgetWindows.set(widgetId, widgetWin);
+
+      const safeTitle = (title || 'Akki Widget')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;');
+      const safeWidgetId = (widgetId || 'widget')
+        .toUpperCase()
+        .replace(/"/g, '')
+        .replace(/</g, '');
+      const activeTheme = (theme || 'cyan').toLowerCase();
+
+      const themeMap: Record<string, any> = {
+        cyan: {
+          border: 'rgba(0, 229, 255, 0.25)',
+          borderHover: 'rgba(0, 229, 255, 0.45)',
+          glow: 'rgba(0, 229, 255, 0.15)',
+          accent: '#00e5ff',
+          headerGlow: 'rgba(0, 229, 255, 0.15)',
+          badgeBg: 'rgba(0, 229, 255, 0.1)',
+          badgeBorder: 'rgba(0, 229, 255, 0.2)',
+          badgeText: '#00e5ff',
+          badgeLabel: 'CYAN LINK',
+        },
+        amber: {
+          border: 'rgba(255, 199, 0, 0.25)',
+          borderHover: 'rgba(255, 199, 0, 0.45)',
+          glow: 'rgba(255, 199, 0, 0.15)',
+          accent: '#ffc700',
+          headerGlow: 'rgba(255, 199, 0, 0.15)',
+          badgeBg: 'rgba(255, 199, 0, 0.1)',
+          badgeBorder: 'rgba(255, 199, 0, 0.2)',
+          badgeText: '#ffc700',
+          badgeLabel: 'AMBER LINK',
+        },
+        crimson: {
+          border: 'rgba(255, 46, 46, 0.25)',
+          borderHover: 'rgba(255, 46, 46, 0.45)',
+          glow: 'rgba(255, 46, 46, 0.15)',
+          accent: '#ff2e2e',
+          headerGlow: 'rgba(255, 46, 46, 0.15)',
+          badgeBg: 'rgba(255, 46, 46, 0.1)',
+          badgeBorder: 'rgba(255, 46, 46, 0.2)',
+          badgeText: '#ff2e2e',
+          badgeLabel: 'CRIMSON LINK',
+        },
+        emerald: {
+          border: 'rgba(0, 255, 163, 0.25)',
+          borderHover: 'rgba(0, 255, 163, 0.45)',
+          glow: 'rgba(0, 255, 163, 0.15)',
+          accent: '#00ffa3',
+          headerGlow: 'rgba(0, 255, 163, 0.15)',
+          badgeBg: 'rgba(0, 255, 163, 0.1)',
+          badgeBorder: 'rgba(0, 255, 163, 0.2)',
+          badgeText: '#00ffa3',
+          badgeLabel: 'EMERALD LINK',
+        },
+        blue: {
+          border: 'rgba(0, 133, 255, 0.25)',
+          borderHover: 'rgba(0, 133, 255, 0.45)',
+          glow: 'rgba(0, 133, 255, 0.15)',
+          accent: '#0085ff',
+          headerGlow: 'rgba(0, 133, 255, 0.15)',
+          badgeBg: 'rgba(0, 133, 255, 0.1)',
+          badgeBorder: 'rgba(0, 133, 255, 0.2)',
+          badgeText: '#0085ff',
+          badgeLabel: 'BLUE LINK',
+        },
+      };
+
+      const t = themeMap[activeTheme] || themeMap.cyan;
+
+      const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>${safeTitle}</title>
+<style>
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  .hud-container {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid ${t.border};
+    background: rgba(8, 13, 18, 0.95);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 0 25px ${t.glow}, 0 20px 50px rgba(0, 0, 0, 0.8);
+    color: #e1f8ff;
+    transition: all 0.3s ease;
+  }
+  .hud-container:hover {
+    border-color: ${t.borderHover};
+  }
+  .hud-scanline {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    opacity: 0.04;
+    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 255, 0, 0.06));
+    background-size: 100% 2px, 3px 100%;
+  }
+  .hud-inner-border {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+  }
+  .hud-header {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    background: rgba(0, 0, 0, 0.6);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    user-select: none;
+    cursor: move;
+    -webkit-app-region: drag;
+    position: relative;
+    z-index: 20;
+  }
+  .hud-header-glow {
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 35%;
+    background: linear-gradient(to right, ${t.headerGlow}, transparent);
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.4;
+  }
+  .hud-header-left {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .hud-header-titles {
+    display: flex;
+    flex-direction: column;
+  }
+  .hud-title {
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 420px;
+  }
+  .hud-subtitle {
+    font-size: 9px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: ${t.accent};
+    opacity: 0.7;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-top: 1px;
+  }
+  .hud-header-right {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    -webkit-app-region: no-drag;
+  }
+  .hud-badge {
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: ${t.badgeBg};
+    border: 1px solid ${t.badgeBorder};
+    color: ${t.badgeText};
+  }
+  .hud-close-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.4);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+  .hud-close-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  .hud-close-btn:active {
+    transform: scale(0.95);
+  }
+  .hud-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 28px;
+    position: relative;
+    z-index: 10;
+    user-select: text;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #cbd5e1;
+  }
+  .hud-body::-webkit-scrollbar {
+    width: 4px;
+  }
+  .hud-body::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .hud-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 9999px;
+  }
+  .hud-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+  }
+  .hud-footer {
+    flex: none;
+    padding: 9px 20px;
+    background: rgba(0, 0, 0, 0.4);
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    color: rgba(255, 255, 255, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    position: relative;
+    z-index: 20;
+    user-select: none;
+  }
+  .hud-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .hud-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: ${t.accent};
+    box-shadow: 0 0 8px ${t.accent};
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+</style>
+</head>
+<body>
+  <div class="hud-container">
+    <div class="hud-scanline"></div>
+    <div class="hud-inner-border"></div>
+    <div class="hud-header">
+      <div class="hud-header-glow"></div>
+      <div class="hud-header-left">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${t.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+          <polyline points="2 17 12 22 22 17"></polyline>
+          <polyline points="2 12 12 17 22 12"></polyline>
+        </svg>
+        <div class="hud-header-titles">
+          <span class="hud-title">${safeTitle}</span>
+          <span class="hud-subtitle">PORTAL LINK: ${safeWidgetId}</span>
+        </div>
+      </div>
+      <div class="hud-header-right">
+        <span class="hud-badge">${t.badgeLabel}</span>
+        <button class="hud-close-btn" onclick="window.close()" title="Close Portal">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="hud-body">
+      ${htmlContent}
+    </div>
+    <div class="hud-footer">
+      <div class="hud-status">
+        <div class="hud-status-dot"></div>
+        <span>SIGNAL SYNCHRONIZED</span>
+      </div>
+      <span>Akki Engine v2.1.0</span>
+    </div>
+  </div>
+</body>
+</html>`;
+
+      widgetWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(fullHtml));
+      widgetWin.on('closed', () => {
+        widgetWindows.delete(widgetId);
+      });
+
+      return { success: true, widgetId };
+    }
+  );
+
+  ipcMain.handle('close-widget-window', async (_event, widgetId: string) => {
+    if (widgetId === 'all') {
+      widgetWindows.forEach((win) => {
+        if (!win.isDestroyed()) win.close();
+      });
+      widgetWindows.clear();
+      return true;
+    }
+    const win = widgetWindows.get(widgetId);
+    if (win && !win.isDestroyed()) {
+      win.close();
+      return true;
+    }
+    return false;
+  });
 
   // ── 20. Agent Town & Hermes Handlers ──────────────────────────────────────
   ipcMain.handle('agent-report-add', (_event, report: any) => ({ success: true, report }));
@@ -1718,7 +2109,24 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return true;
   });
   ipcMain.handle('get-app-version', () => app.getVersion());
-  ipcMain.handle('get-user-location', () => 'India');
+  ipcMain.handle('get-user-location', async () => {
+    try {
+      const resp = await fetch('https://ipwho.is/');
+      const data: any = await resp.json();
+      if (data && data.success) {
+        return {
+          location: `${data.city}, ${data.region}, ${data.country}`,
+          city: data.city,
+          region: data.region,
+          country: data.country,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          timezone: data.timezone?.id || '',
+        };
+      }
+    } catch (_) {}
+    return { location: 'India' };
+  });
   ipcMain.handle('get-google-photo-url', () => null);
   ipcMain.handle('get-stored-user', () => null);
   ipcMain.handle('get-openrouter-models', () => ({ data: [{ id: 'anthropic/claude-3.5-sonnet' }, { id: 'meta-llama/llama-3.3-70b-instruct' }] }));
@@ -1895,9 +2303,12 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('skills-load-content', async (_event, payload: any) => {
     const folderName = typeof payload === 'string' ? payload : (payload?.folderName || payload?.skillName || '');
     if (folderName && ctx.skillsService.loadSkillContent) {
-      return ctx.skillsService.loadSkillContent(folderName);
+      const content = ctx.skillsService.loadSkillContent(folderName);
+      if (content) {
+        return { success: true, content, isCore: true };
+      }
     }
-    return '';
+    return { success: false, error: `Skill "${folderName}" could not be loaded.` };
   });
 
   ipcMain.handle('refresh-available-models', async (_event, params?: { provider?: string; apiKey?: string }) => {
@@ -2085,7 +2496,66 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('setup-guide-should-show', shouldShowGuide);
 
   ipcMain.handle('open-neural-browser', () => true);
-  ipcMain.handle('launch-browser-login-session', () => true);
+  ipcMain.handle('launch-browser-login-session', async () => {
+    try {
+      const { execSync, spawn } = require('child_process');
+      const os = require('os');
+      try {
+        if (process.platform === 'win32') {
+          execSync('wmic process where "name=\'chrome.exe\' and commandline like \'%chrome-debug-profile%\'" call terminate', { stdio: 'ignore' });
+          execSync('wmic process where "name=\'chrome.exe\' and commandline like \'%--remote-debugging-port=9222%\'" call terminate', { stdio: 'ignore' });
+        } else {
+          execSync('pkill -f "chrome-debug-profile" || true', { stdio: 'ignore' });
+          execSync('pkill -f "remote-debugging-port=9222.*chrome-debug-profile" || true', { stdio: 'ignore' });
+        }
+      } catch (_) {}
+
+      const hermesHome = process.env.HERMES_HOME || path.join(os.homedir(), '.hermes');
+      const uid = 'shared';
+      const chromeUserDataDir = path.join(hermesHome, 'chrome-debug-profile-' + uid);
+
+      let chromePath: string | null = null;
+      if (process.platform === 'win32') {
+        const paths = [
+          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+        ];
+        chromePath = paths.find((p) => fs.existsSync(p)) || null;
+      } else if (process.platform === 'darwin') {
+        chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+      } else {
+        chromePath = 'google-chrome';
+      }
+
+      if (!chromePath || (process.platform === 'win32' && !fs.existsSync(chromePath))) {
+        return {
+          success: false,
+          error: 'Google Chrome was not found on your system. Please install standard Google Chrome.',
+        };
+      }
+
+      const child = spawn(
+        chromePath,
+        [
+          `--user-data-dir=${chromeUserDataDir}`,
+          `--remote-debugging-port=9222`,
+          `--enable-automation=false`,
+          `--disable-blink-features=AutomationControlled`,
+          'https://accounts.google.com',
+        ],
+        {
+          detached: true,
+          stdio: 'ignore',
+        }
+      );
+      child.unref();
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  });
 
   // ── 22. Legacy Preferences Handlers ───────────────────────────────────────
   ipcMain.handle('get-wake-word-enabled', () => {
