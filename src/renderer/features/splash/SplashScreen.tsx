@@ -71,6 +71,11 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinished }) => {
       return () => clearInterval(interval);
     }
 
+    if (audioRef.current) {
+      audioRef.current.volume = 0.7;
+      audioRef.current.play().catch(console.error);
+    }
+
     let currentVal = 0;
     const progressInterval = setInterval(() => {
       const inc = Math.random() * 4 + 1;
@@ -89,6 +94,25 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinished }) => {
   }, [hasFinishedCb]);
 
   const handleCompletion = () => {
+    const q = audioRef.current;
+    if (q) {
+      const h = setInterval(() => {
+        if (q.volume > 0.05) {
+          q.volume -= 0.05;
+        } else {
+          clearInterval(h);
+          q.pause();
+        }
+      }, 100);
+    }
+    try {
+      const h = new Audio('audio/access_granted.wav');
+      h.volume = 0.8;
+      h.play().catch((e) => console.warn('Audio play failed:', e));
+    } catch (h) {
+      console.error('Audio error:', h);
+    }
+
     // Notify electron main process
     try {
       if (window.electronAPI?.notifyAppReady) {
@@ -99,9 +123,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinished }) => {
     }
 
     if (onFinished) {
-      setTimeout(() => {
-        onFinished();
-      }, 150);
+      onFinished();
     }
   };
 
@@ -112,6 +134,11 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ onFinished }) => {
       className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[#000000] text-white overflow-hidden select-none cursor-wait"
       style={{ fontFamily: "'Outfit', sans-serif" }}
     >
+      {hasFinishedCb && (
+        <audio ref={audioRef} loop>
+          <source src="audio/loading.wav" type="audio/wav" />
+        </audio>
+      )}
 
       <style
         dangerouslySetInnerHTML={{

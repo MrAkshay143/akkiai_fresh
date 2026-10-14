@@ -27,7 +27,7 @@ export class AIService {
 
     this.geminiService = new GeminiService({
       geminiApiKey: initialApiKey || process.env.GEMINI_API_KEY || '',
-      primaryModel: 'gemini-2.5-flash',
+      primaryModel: 'gemini-3.8-flash',
     });
 
     if (toolRegistry) {
@@ -80,7 +80,7 @@ export class AIService {
     const settings = this.currentSettings ? this.currentSettings() : undefined;
     const apiKey = (payload.options?.geminiApiKey as string) || settings?.geminiApiKey;
     const openRouterKey = (payload.options?.openRouterApiKey as string) || settings?.openRouterApiKey;
-    const model = payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel || 'gemini-3.1-flash-lite';
+    const model = payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel || 'gemini-3.8-flash';
     const persona = settings?.selectedPersona || 'caring_companion';
 
     if (apiKey) this.geminiService.setApiKey(apiKey);
