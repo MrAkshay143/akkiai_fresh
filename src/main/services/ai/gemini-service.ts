@@ -292,7 +292,18 @@ export class GeminiService {
         }
 
         // Report real Gemini error honestly without disguising as mock
-        throw new Error(`Google Gemini API Error (${modelName}): ${geminiError.message}`);
+        let errMsg = geminiError.message || String(geminiError);
+        try {
+          const parsed = JSON.parse(errMsg);
+          if (parsed?.error?.message) {
+            errMsg = parsed.error.message;
+            try {
+              const inner = JSON.parse(errMsg);
+              if (inner?.error?.message) errMsg = inner.error.message;
+            } catch {}
+          }
+        } catch {}
+        throw new Error(`Google Gemini API Error (${modelName}): ${errMsg}`);
       }
     }
 
@@ -344,7 +355,17 @@ export class GeminiService {
     signal: AbortSignal
   ): Promise<GenerateResult> {
     const apiKey = this.config.geminiApiKey!;
-    const modelName = options.model || this.config.primaryModel || 'gemini-3.8-flash';
+    let modelName = options.model || this.config.primaryModel || 'gemini-3.5-flash-lite';
+    if (
+      !modelName ||
+      modelName === 'gemini-2.0-flash' ||
+      modelName === 'gemini-2.5-flash' ||
+      modelName === 'gemini-2.5-flash-lite' ||
+      modelName === 'gemini-1.5-flash' ||
+      modelName === 'gemini-1.5-pro'
+    ) {
+      modelName = 'gemini-3.5-flash-lite';
+    }
     const ai = new GoogleGenAI({ apiKey });
 
     // Prepare contents
@@ -449,27 +470,40 @@ export class GeminiService {
       turn++;
       const currentTurnFunctionCalls: Array<{ name: string; args: Record<string, any> }> = [];
 
-      const candidateModels = [modelName, 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter((v, i, a) => a.indexOf(v) === i);
+      const candidateModels = [
+        modelName,
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+        'gemini-3-flash-preview',
+        'gemini-3.5-flash',
+        'gemini-3.8-flash',
+      ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
       let streamResponse: any = null;
+      let primaryStreamErr: any = null;
       let lastStreamErr: any = null;
 
-      for (const candidate of candidateModels) {
+      for (let idx = 0; idx < candidateModels.length; idx++) {
+        const candidate = candidateModels[idx];
         try {
           streamResponse = await ai.models.generateContentStream({
             model: candidate,
             contents,
             config: genConfig,
           });
+          if (idx > 0) {
+            console.info(`[GeminiService] Primary model failed, recovered seamlessly with fallback model: ${candidate}`);
+          }
           break;
         } catch (err: any) {
+          if (!primaryStreamErr) primaryStreamErr = err;
           lastStreamErr = err;
-          console.warn(`[GeminiService] Model ${candidate} stream failed, trying fallback:`, err.message);
+          console.warn(`[GeminiService] Model ${candidate} stream failed, trying next candidate:`, err.message);
           if (signal.aborted) throw err;
         }
       }
 
       if (!streamResponse) {
-        throw lastStreamErr || new Error(`Google Gemini stream failed for all candidate models`);
+        throw primaryStreamErr || lastStreamErr || new Error(`Google Gemini stream failed for all candidate models`);
       }
 
       for await (const chunk of streamResponse) {

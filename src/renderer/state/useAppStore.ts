@@ -321,7 +321,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   settings: {
-    primaryModel: 'gemini-2.5-flash',
+    primaryModel: 'gemini-3.5-flash-lite',
     geminiApiKey: '',
     openRouterApiKey: '',
     huggingFaceApiKey: '',

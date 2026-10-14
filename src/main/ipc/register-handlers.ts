@@ -2337,9 +2337,10 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
     const defaultGemini = [
       { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
       { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
-      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+      { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+      { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
     ];
     const defaultOpenRouter = [
       { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },

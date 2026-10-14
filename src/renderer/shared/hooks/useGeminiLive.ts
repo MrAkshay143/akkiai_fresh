@@ -65,6 +65,8 @@ export function useGeminiLive() {
     assistantStatus,
     setAssistantStatus,
     addMessage,
+    setMessages,
+    setIsStreaming,
     setCompanionSpeech,
     settings,
   } = useAppStore();
@@ -85,7 +87,9 @@ export function useGeminiLive() {
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
   const isConnectingRef = useRef<boolean>(false);
-  const currentMsgIdRef = useRef<string | null>(null);
+  const liveAssistantMsgIdRef = useRef<string | null>(null);
+  const liveAssistantTextRef = useRef<string>('');
+  const liveUserTextRef = useRef<string>('');
 
   // Clean up all audio resources
   const cleanup = useCallback(() => {
@@ -133,7 +137,12 @@ export function useGeminiLive() {
       } catch {}
       liveSessionRef.current = null;
     }
-  }, []);
+
+    liveAssistantMsgIdRef.current = null;
+    liveAssistantTextRef.current = '';
+    liveUserTextRef.current = '';
+    setIsStreaming(false);
+  }, [setIsStreaming]);
 
   // Connect to Gemini Live Multimodal BiDi Session
   const connect = useCallback(async () => {
@@ -208,6 +217,8 @@ export function useGeminiLive() {
               },
             },
           },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           realtimeInputConfig: {
             automaticActivityDetection: {
               startOfSpeechSensitivity: 'START_SENSITIVITY_LOW' as any,
@@ -267,6 +278,8 @@ export function useGeminiLive() {
 
             // Incoming Audio Playback (serverContent.modelTurn.parts)
             const parts = msg.serverContent?.modelTurn?.parts || [];
+            let incomingTextDelta = '';
+
             for (const part of parts) {
               const inlineData = part?.inlineData;
               if (inlineData?.data && audioContextOutputRef.current) {
@@ -299,31 +312,61 @@ export function useGeminiLive() {
                 }
               }
 
-              // Text transcription updates
-              if (part.text) {
-                setCompanionSpeech(part.text);
+              // Text transcription updates from parts
+              if (part?.text && !part.thought) {
+                incomingTextDelta += part.text;
               }
+            }
+
+            // AI Output transcription (serverContent.outputTranscription.text)
+            if (msg.serverContent?.outputTranscription?.text) {
+              incomingTextDelta += msg.serverContent.outputTranscription.text;
+            }
+
+            // If there is incoming AI speech text, update both companion speech AND ChatDrawer message!
+            if (incomingTextDelta) {
+              if (!liveAssistantMsgIdRef.current) {
+                liveAssistantMsgIdRef.current = `live-a-${Date.now()}`;
+                liveAssistantTextRef.current = '';
+                setIsStreaming(true);
+              }
+              liveAssistantTextRef.current += incomingTextDelta;
+              const fullAssistantText = liveAssistantTextRef.current;
+
+              // 1. Floating companion speech bubble over orb
+              setCompanionSpeech(fullAssistantText);
+
+              // 2. ChatDrawer message stream
+              setMessages((prev) => {
+                const targetId = liveAssistantMsgIdRef.current;
+                const existingIdx = prev.findIndex((m) => m.id === targetId);
+                if (existingIdx !== -1) {
+                  const updated = [...prev];
+                  updated[existingIdx] = {
+                    ...updated[existingIdx],
+                    content: fullAssistantText,
+                  };
+                  return updated;
+                } else {
+                  return [
+                    ...prev,
+                    {
+                      id: targetId!,
+                      sender: 'assistant',
+                      avatarType: 'akki',
+                      content: fullAssistantText,
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    },
+                  ];
+                }
+              });
             }
 
             // User audio transcription
             if (msg.serverContent?.inputTranscription?.text) {
               const userTranscript = msg.serverContent.inputTranscription.text;
               if (userTranscript) {
-                addMessage({
-                  id: `user-${Date.now()}`,
-                  sender: 'user',
-                  avatarType: 'user',
-                  content: userTranscript,
-                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                });
-              }
-            }
-
-            // AI Output transcription
-            if (msg.serverContent?.outputTranscription?.text) {
-              const aiTranscript = msg.serverContent.outputTranscription.text;
-              if (aiTranscript) {
-                setCompanionSpeech(aiTranscript);
+                liveUserTextRef.current += userTranscript;
               }
             }
 
@@ -337,13 +380,40 @@ export function useGeminiLive() {
               activeSourcesRef.current.clear();
               nextStartTimeRef.current = 0;
               setAssistantStatus('listening');
+              setIsStreaming(false);
+              liveAssistantMsgIdRef.current = null;
+              liveAssistantTextRef.current = '';
+              liveUserTextRef.current = '';
             }
 
             // Turn Complete
             if (msg.serverContent?.turnComplete) {
-              if (currentMsgIdRef.current) {
-                currentMsgIdRef.current = null;
+              setIsStreaming(false);
+
+              // If user transcript was collected during this turn, ensure user message is added
+              const userSpeech = liveUserTextRef.current.trim();
+              if (userSpeech) {
+                setMessages((prev) => {
+                  const alreadyPresent = prev.some(
+                    (m) => m.sender === 'user' && m.content.trim() === userSpeech
+                  );
+                  if (alreadyPresent) return prev;
+                  return [
+                    ...prev,
+                    {
+                      id: `user-${Date.now()}`,
+                      sender: 'user',
+                      avatarType: 'user',
+                      content: userSpeech,
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    },
+                  ];
+                });
+                liveUserTextRef.current = '';
               }
+
+              liveAssistantMsgIdRef.current = null;
+              liveAssistantTextRef.current = '';
             }
 
             // Tool Calling dispatch

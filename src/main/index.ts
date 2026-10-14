@@ -51,7 +51,7 @@ import type {
 
 // Default Storage Fixtures
 const DEFAULT_SETTINGS: AppSettings = {
-  primaryModel: 'gemini-2.5-flash',
+  primaryModel: 'gemini-3.5-flash-lite',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   openRouterApiKey: '',
   huggingFaceApiKey: '',
@@ -212,7 +212,13 @@ if (!gotTheLock) {
     // Update settingsStore with loaded keys and modern model
     settingsStore.update((current) => ({
       ...current,
-      primaryModel: current.primaryModel || 'gemini-2.5-flash',
+      primaryModel:
+        !current.primaryModel ||
+        current.primaryModel === 'gemini-2.0-flash' ||
+        current.primaryModel === 'gemini-2.5-flash' ||
+        current.primaryModel === 'gemini-2.5-flash-lite'
+          ? 'gemini-3.5-flash-lite'
+          : current.primaryModel,
       geminiApiKey: initialGeminiKey || current.geminiApiKey,
       openRouterApiKey: initialOpenRouterKey || current.openRouterApiKey,
       huggingFaceApiKey: initialHfKey || current.huggingFaceApiKey,

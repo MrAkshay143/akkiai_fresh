@@ -80,7 +80,17 @@ export class AIService {
     const settings = this.currentSettings ? this.currentSettings() : undefined;
     const apiKey = (payload.options?.geminiApiKey as string) || settings?.geminiApiKey;
     const openRouterKey = (payload.options?.openRouterApiKey as string) || settings?.openRouterApiKey;
-    const model = payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel || 'gemini-3.8-flash';
+    let model = payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel || 'gemini-3.5-flash-lite';
+    if (
+      !model ||
+      model === 'gemini-2.0-flash' ||
+      model === 'gemini-2.5-flash' ||
+      model === 'gemini-2.5-flash-lite' ||
+      model === 'gemini-1.5-flash' ||
+      model === 'gemini-1.5-pro'
+    ) {
+      model = 'gemini-3.5-flash-lite';
+    }
     const persona = settings?.selectedPersona || 'caring_companion';
 
     if (apiKey) this.geminiService.setApiKey(apiKey);
