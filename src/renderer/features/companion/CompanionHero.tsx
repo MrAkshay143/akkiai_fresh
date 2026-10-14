@@ -47,15 +47,44 @@ export const CompanionHero: React.FC = () => {
   const [isCameraLoading, setIsCameraLoading] = useState(false);
   const [isScreenLoading, setIsScreenLoading] = useState(false);
 
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(1000);
+
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+
+    const el = wrapperRef.current;
+    let ro: ResizeObserver | null = null;
+    if (el) {
+      setContainerWidth(el.clientWidth || el.getBoundingClientRect().width);
+      ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.contentRect.width > 0) {
+            setContainerWidth(entry.contentRect.width);
+          }
+        }
+      });
+      ro.observe(el);
+    }
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (ro) ro.disconnect();
+    };
   }, []);
 
-  const isMobile = windowWidth < 768;
-  const isTablet = windowWidth >= 768 && windowWidth < 1280;
-  const gapToGlobe = isMobile ? 40 : isTablet ? 100 : 340;
+  // On wide containers (Full HD >= 950px), use reference baseline 340px gap and 1.0 scale
+  // On constrained containers (1600x900 ~606px, 1280x800 ~371px), contract gap and scale so neither nodes nor orb card clip
+  const isLargeScreen = containerWidth >= 950;
+  const baseGap = isLargeScreen
+    ? 340
+    : Math.max(25, Math.min(340, containerWidth - 620));
+  const naturalWidth = 220 + baseGap + 400;
+  const scale = isLargeScreen
+    ? 1
+    : Math.min(1, Math.max(0.5, (containerWidth - 8) / naturalWidth));
+  const gapToGlobe = baseGap;
 
   // Camera Management
   const stopCamera = () => {
@@ -132,10 +161,16 @@ export const CompanionHero: React.FC = () => {
       : 'STANDBY';
 
   return (
-    <div className="w-full h-full flex items-center justify-center overflow-hidden">
+    <div
+      ref={wrapperRef}
+      className="w-full h-full flex items-center justify-center overflow-hidden"
+    >
       <div
-        className="flex items-center justify-center max-w-[1200px] w-full mx-auto relative pt-2 md:pt-4"
-        style={{ gap: gapToGlobe }}
+        className="flex items-center justify-center shrink-0 relative pt-2 md:pt-4 origin-center transition-transform duration-150"
+        style={{
+          gap: gapToGlobe,
+          transform: scale < 1 ? `scale(${scale})` : undefined,
+        }}
       >
         {/* ── Left Trigger Nodes (Memory, Soul, Skills, Settings with dynamic SVG fiber lines) ── */}
         <div className="w-[150px] md:w-[220px] shrink-0 z-0 flex flex-col justify-center">
