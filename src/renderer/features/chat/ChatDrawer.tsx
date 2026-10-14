@@ -10,6 +10,10 @@ import {
   Sparkles,
   Bot,
   AlertTriangle,
+  AlertCircle,
+  Info,
+  Cpu,
+  Terminal,
   Loader2,
   ChevronDown,
   ChevronRight,
@@ -32,9 +36,12 @@ interface AttachedFile {
 interface LogEntry {
   id: string;
   timestamp: string;
-  level: 'info' | 'tool' | 'error' | 'agent';
+  level: 'info' | 'tool' | 'error' | 'agent' | 'warning' | 'success';
   message: string;
-  details?: string;
+  details?: any;
+  toolName?: string;
+  duration?: string;
+  durationMs?: number;
 }
 
 interface ChatSession {
@@ -395,14 +402,57 @@ export const ChatDrawer: React.FC = () => {
     },
     {
       id: 'log-3',
-      timestamp: '11:41:00',
+      timestamp: '11:40:22',
       level: 'tool',
-      message: 'Tool registered: web_search, play_youtube_video, generate_diagram.',
+      toolName: 'query_memory',
+      duration: '0.8s',
+      durationMs: 800,
+      message: 'Module: query_memory',
+      details: {
+        params: { query: 'user_profile', limit: 5 },
+        output: { status: 'success', matchCount: 3, memoryIds: ['mem_01', 'mem_02'] },
+      },
+    },
+    {
+      id: 'log-4',
+      timestamp: '11:40:24',
+      level: 'tool',
+      toolName: 'store_memory',
+      duration: '0.1s',
+      durationMs: 100,
+      message: 'Module: store_memory',
+      details: {
+        params: { fact: 'Session active', importance: 5 },
+        output: { status: 'stored', memoryId: 'mem_vect_88219', persisted: true },
+      },
+    },
+    {
+      id: 'log-5',
+      timestamp: '11:40:25',
+      level: 'tool',
+      toolName: 'manage_tasks',
+      duration: '0.8s',
+      durationMs: 800,
+      message: 'Module: manage_tasks',
+      details: {
+        params: { action: 'list' },
+        output: { tasks: ['Research models', 'Sync workspace'], count: 2 },
+      },
     },
   ]);
   const [logFilter, setLogFilter] = useState<'all' | 'info' | 'tool' | 'error'>('all');
+  const [expandedLogIds, setExpandedLogIds] = useState<Set<string>>(new Set());
+  const logsScrollRef = useRef<HTMLDivElement | null>(null);
+  const toolStartTimesRef = useRef<Map<string, number>>(new Map());
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll logs
+  useEffect(() => {
+    if (logsScrollRef.current) {
+      logsScrollRef.current.scrollTop = logsScrollRef.current.scrollHeight;
+    }
+  }, [logs]);
 
   // Initial load of messages for active session
   useEffect(() => {
@@ -459,14 +509,38 @@ export const ChatDrawer: React.FC = () => {
   useEffect(() => {
     if ((window as any).electronAPI?.onToolResult) {
       const cleanup = (window as any).electronAPI.onToolResult((result: any) => {
+        const toolName = result.toolName || result.name || 'tool';
+        const durationSec =
+          result.executionTimeSec != null
+            ? `${Number(result.executionTimeSec).toFixed(1)}s`
+            : '0.8s';
+        const durationMs =
+          result.executionTimeSec != null
+            ? Math.round(Number(result.executionTimeSec) * 1000)
+            : 800;
+
         setLogs((prev) => [
           ...prev,
           {
-            id: `log-${Date.now()}`,
-            timestamp: new Date().toLocaleTimeString(),
-            level: 'tool',
-            message: `Tool Executed: ${result.toolName}`,
-            details: JSON.stringify(result.output || {}),
+            id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: new Date().toLocaleTimeString([], {
+              hour12: false,
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+            level: result.status === 'error' || result.error ? 'error' : 'tool',
+            toolName,
+            duration: durationSec,
+            durationMs,
+            message: `Module: ${toolName}`,
+            details:
+              result.params || result.output
+                ? {
+                    params: result.params || result.args,
+                    output: result.output,
+                  }
+                : result.details || result.output,
           },
         ]);
 
@@ -568,21 +642,22 @@ export const ChatDrawer: React.FC = () => {
           };
           return updated;
         });
-        setLogs((prev) => [
-          ...prev,
-          {
-            id: `log-${Date.now()}`,
-            timestamp: new Date().toLocaleTimeString(),
-            level: 'tool',
-            message: `Tool Started: ${toolName}`,
-            details: JSON.stringify(sI.data?.args || {}),
-          },
-        ]);
+        const toolKey = toolId || toolName;
+        toolStartTimesRef.current.set(toolKey, Date.now());
+        toolStartTimesRef.current.set(toolName, Date.now());
       } else if (sI.stream === 'tool_end') {
         const toolName = sI.data?.name || 'tool';
         const toolId = sI.data?.id ? `tool-${sI.data.id}` : null;
         const isOk = sI.data?.ok !== false;
         const output = sI.data?.output;
+
+        const startTime =
+          (toolId && toolStartTimesRef.current.get(toolId)) ||
+          toolStartTimesRef.current.get(toolName);
+        const durationMs = startTime ? Date.now() - startTime : 800;
+        const durationSec = Number((durationMs / 1000).toFixed(1));
+        if (toolId) toolStartTimesRef.current.delete(toolId);
+        toolStartTimesRef.current.delete(toolName);
 
         setMessages((prev) => {
           const lastIdx = [...prev].reverse().findIndex((m) => m.sender === 'assistant');
@@ -597,6 +672,7 @@ export const ChatDrawer: React.FC = () => {
           if (toolIdx !== -1) {
             tools[toolIdx] = {
               ...tools[toolIdx],
+              executionTimeSec: durationSec,
               status: isOk ? 'success' : 'error',
               output,
             };
@@ -604,7 +680,7 @@ export const ChatDrawer: React.FC = () => {
             tools.push({
               id: toolId || `tool-${Date.now()}`,
               toolName,
-              executionTimeSec: 0,
+              executionTimeSec: durationSec,
               status: isOk ? 'success' : 'error',
               output,
             });
@@ -619,11 +695,22 @@ export const ChatDrawer: React.FC = () => {
         setLogs((prev) => [
           ...prev,
           {
-            id: `log-${Date.now()}`,
-            timestamp: new Date().toLocaleTimeString(),
-            level: 'tool',
-            message: `Tool Finished: ${toolName} (${isOk ? 'OK' : 'FAIL'})`,
-            details: typeof output === 'string' ? output : JSON.stringify(output || {}),
+            id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            timestamp: new Date().toLocaleTimeString([], {
+              hour12: false,
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+            }),
+            level: isOk ? 'tool' : 'error',
+            toolName,
+            duration: `${durationSec.toFixed(1)}s`,
+            durationMs,
+            message: `Module: ${toolName}`,
+            details: {
+              params: sI.data?.args,
+              output,
+            },
           },
         ]);
       } else if (sI.stream === 'status') {
@@ -1144,6 +1231,48 @@ export const ChatDrawer: React.FC = () => {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
         addMessage(assistantMsg);
+
+        if (toolCalls && toolCalls.length > 0) {
+          toolCalls.forEach((tc: any) => {
+            const toolName = tc.toolName || tc.name || 'tool';
+            const durationSec =
+              tc.executionTimeSec != null
+                ? `${Number(tc.executionTimeSec).toFixed(1)}s`
+                : '0.8s';
+            setLogs((prev) => {
+              if (
+                prev.some(
+                  (l) =>
+                    l.toolName === toolName &&
+                    Date.now() - parseInt(l.id.split('-')[1] || '0') < 3000
+                )
+              ) {
+                return prev;
+              }
+              return [
+                ...prev,
+                {
+                  id: `log-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                  timestamp: new Date().toLocaleTimeString([], {
+                    hour12: false,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  }),
+                  level: tc.status === 'error' || tc.error ? 'error' : 'tool',
+                  toolName,
+                  duration: durationSec,
+                  durationMs: Math.round((tc.executionTimeSec || 0.8) * 1000),
+                  message: `Module: ${toolName}`,
+                  details: {
+                    params: tc.params || tc.args,
+                    output: tc.output,
+                  },
+                },
+              ];
+            });
+          });
+        }
       } else {
         // Fallback simulation
         setTimeout(() => {
@@ -1156,6 +1285,27 @@ export const ChatDrawer: React.FC = () => {
               output: { query: userText, resultsFound: 3 },
             },
           ];
+          setLogs((prev) => [
+            ...prev,
+            {
+              id: `log-${Date.now()}`,
+              timestamp: new Date().toLocaleTimeString([], {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              }),
+              level: 'tool',
+              toolName: 'web_search',
+              duration: '0.6s',
+              durationMs: 600,
+              message: 'Module: web_search',
+              details: {
+                params: { query: userText },
+                output: { query: userText, resultsFound: 3 },
+              },
+            },
+          ]);
           addMessage({
             id: `msg-${Date.now() + 1}`,
             sender: 'assistant',
@@ -1183,7 +1333,12 @@ export const ChatDrawer: React.FC = () => {
         ...prev,
         {
           id: `log-${Date.now()}`,
-          timestamp: new Date().toLocaleTimeString(),
+          timestamp: new Date().toLocaleTimeString([], {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          }),
           level: 'error',
           message: `Generation error: ${err.message}`,
         },
@@ -1195,6 +1350,7 @@ export const ChatDrawer: React.FC = () => {
 
   const filteredLogs = logs.filter((log) => {
     if (logFilter === 'all') return true;
+    if (logFilter === 'tool') return log.level === 'tool' || log.message.startsWith('Module:');
     return log.level === logFilter;
   });
 
@@ -1560,66 +1716,288 @@ export const ChatDrawer: React.FC = () => {
         ) : (
           /* ── Logs Terminal View (Exact Old App QK container) ──────── */
           <div className="flex-1 overflow-hidden flex flex-col px-6 py-4">
-            <div className="flex-1 rounded-2xl overflow-hidden border border-white/5 bg-black/20 shadow-inner p-3 flex flex-col font-mono text-[11px]">
-              {/* Logs Filter Toolbar */}
-              <div className="flex items-center justify-between pb-2 border-b border-[rgba(0,229,255,0.08)] mb-2 shrink-0">
-                <div className="flex items-center space-x-1 text-[10px]">
-                  {(['all', 'info', 'tool', 'error'] as const).map((filter) => (
-                    <button
-                      key={filter}
-                      onClick={() => {
-                        playClick();
-                        setLogFilter(filter);
-                      }}
-                      className={`px-2 py-0.5 rounded capitalize transition-colors ${
-                        logFilter === filter
-                          ? 'bg-j-cyan/20 text-j-cyan border border-j-cyan/40'
-                          : 'bg-[#09141d] text-gray-400 hover:text-gray-200 border border-white/5'
-                      }`}
-                    >
-                      {filter}
-                    </button>
-                  ))}
+            <div className="flex-1 rounded-2xl overflow-hidden border border-white/5 bg-[#0a0d10] font-mono text-[11px] relative group shadow-2xl flex flex-col">
+              {/* Header: Core_Log_Stream + Filter Toolbar */}
+              <div className="px-5 py-3 border-b border-white/5 bg-white/[0.02] flex items-center justify-between shrink-0 relative z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.5)] animate-pulse" />
+                  <span className="text-[10px] font-bold uppercase tracking-[0.3em] text-white/60">
+                    Core_Log_Stream
+                  </span>
                 </div>
 
-                <button
-                  onClick={() => {
-                    playClick();
-                    setLogs([]);
-                  }}
-                  className="text-gray-500 hover:text-red-400 p-1 rounded transition-colors"
-                  title="Clear Logs"
-                >
-                  <Trash2 size={12} />
-                </button>
+                {/* Filter Toolbar */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center space-x-1 text-[10px]">
+                    {(['all', 'tool', 'info', 'error'] as const).map((filter) => (
+                      <button
+                        key={filter}
+                        onClick={() => {
+                          playClick();
+                          setLogFilter(filter);
+                        }}
+                        className={`px-2 py-0.5 rounded capitalize transition-colors font-mono text-[9px] ${
+                          logFilter === filter
+                            ? 'bg-j-cyan/20 text-j-cyan border border-j-cyan/40'
+                            : 'bg-white/[0.02] text-white/40 hover:text-white/70 border border-white/5'
+                        }`}
+                      >
+                        {filter}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      playClick();
+                      setLogs([]);
+                    }}
+                    className="text-white/30 hover:text-red-400 p-1 rounded transition-colors ml-1"
+                    title="Clear Logs"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
 
               {/* Logs Stream */}
-              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+              <div
+                ref={logsScrollRef}
+                className="flex-1 overflow-y-auto p-0 space-y-0 no-scrollbar scroll-smooth relative z-10 custom-scrollbar"
+              >
                 {filteredLogs.length === 0 ? (
-                  <div className="text-gray-500 text-center py-8">No log entries.</div>
-                ) : (
-                  filteredLogs.map((log) => (
-                    <div
-                      key={log.id}
-                      className="p-1.5 rounded bg-[#100a26] border border-[#23173d] flex flex-col space-y-0.5"
-                    >
-                      <div className="flex items-center space-x-2 text-[10px]">
-                        <span className="text-gray-500">[{log.timestamp}]</span>
-                        {log.level === 'info' && <span className="text-emerald-400">[INFO]</span>}
-                        {log.level === 'agent' && <span className="text-[#00f0ff]">[AGENT]</span>}
-                        {log.level === 'tool' && <span className="text-[#c084fc]">[TOOL]</span>}
-                        {log.level === 'error' && <span className="text-red-400">[ERROR]</span>}
-                        <span className="text-gray-200">{log.message}</span>
-                      </div>
-                      {log.details && (
-                        <div className="text-[9px] text-gray-500 font-mono truncate pl-4">
-                          {log.details}
-                        </div>
-                      )}
+                  <div className="h-full flex flex-col items-center justify-center opacity-30 gap-6 py-16">
+                    <div className="w-16 h-16 border border-j-cyan/20 rounded-2xl flex items-center justify-center animate-pulse rotate-45">
+                      <Terminal size={24} className="text-j-cyan -rotate-45" />
                     </div>
-                  ))
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="uppercase tracking-[0.4em] text-[10px] font-bold text-j-cyan">
+                        Awaiting_Neural_Signals
+                      </span>
+                      <div className="flex gap-1">
+                        {[0, 1, 2].map((m) => (
+                          <div
+                            key={m}
+                            className="w-1 h-1 bg-j-cyan/40 rounded-full animate-bounce"
+                            style={{ animationDelay: `${m * 150}ms` }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-2 divide-y divide-white/[0.02]">
+                    {filteredLogs.map((log) => {
+                      const isTool = log.level === 'tool' || log.message.startsWith('Module:');
+                      const isExpanded = expandedLogIds.has(log.id);
+                      const toolName =
+                        log.toolName ||
+                        (log.message.startsWith('Module:')
+                          ? log.message.replace(/^Module:\s*/, '').trim()
+                          : '');
+                      const duration =
+                        log.duration ||
+                        (log.durationMs
+                          ? `${(log.durationMs / 1000).toFixed(1)}s`
+                          : isTool
+                          ? '0.8s'
+                          : undefined);
+
+                      return (
+                        <div
+                          key={log.id}
+                          onClick={() => {
+                            if (log.details) {
+                              playClick();
+                              setExpandedLogIds((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(log.id)) next.delete(log.id);
+                                else next.add(log.id);
+                                return next;
+                              });
+                            }
+                          }}
+                          className={`group/log px-5 py-2.5 transition-all duration-200 hover:bg-white/[0.03] relative border-l-2 border-transparent hover:border-j-cyan/40 ${
+                            log.details ? 'cursor-pointer' : ''
+                          } ${
+                            log.message.includes('AKKI SYSTEM')
+                              ? 'bg-cyan-400/[0.03] border-y border-cyan-400/5 my-1'
+                              : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            {/* Left: Timestamp, Module / Type, and Name */}
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <span className="text-white/20 shrink-0 font-mono text-[9px] tabular-nums">
+                                {log.timestamp}
+                              </span>
+
+                              {isTool ? (
+                                <div className="flex items-center gap-2 text-[12px] font-medium min-w-0 truncate">
+                                  <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 border border-j-cyan/20 bg-j-cyan/5 text-cyan-400">
+                                    <Sparkles size={11} className="text-cyan-400" />
+                                  </div>
+                                  <span className="text-white/40 whitespace-nowrap font-mono text-[11px]">
+                                    Module:
+                                  </span>
+                                  <span className="text-white/90 font-mono font-medium tracking-wide bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.05] text-[11px] truncate">
+                                    {toolName || log.message}
+                                  </span>
+                                  {log.level === 'error' && (
+                                    <span className="text-red-400 text-[9px] uppercase font-bold tracking-widest bg-red-500/10 px-1.5 py-0.5 rounded-[4px] ml-1">
+                                      Failed
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <div className="flex items-center gap-1.5 shrink-0 min-w-[65px]">
+                                    {log.level === 'error' && (
+                                      <AlertCircle size={12} className="text-red-400" />
+                                    )}
+                                    {log.level === 'warning' && (
+                                      <AlertTriangle size={12} className="text-amber-400" />
+                                    )}
+                                    {log.level === 'success' && (
+                                      <CheckCircle2 size={12} className="text-green-400" />
+                                    )}
+                                    {log.level === 'info' && (
+                                      <Info size={12} className="text-blue-400" />
+                                    )}
+                                    {log.level === 'agent' && (
+                                      <Cpu size={12} className="text-cyan-400" />
+                                    )}
+                                    <span className="uppercase font-black text-[8px] tracking-[0.2em] opacity-60 text-white/50">
+                                      {log.level}
+                                    </span>
+                                  </div>
+                                  <span
+                                    className={`leading-relaxed break-words font-medium tracking-tight text-[11px] truncate ${
+                                      log.message.includes('AKKI SYSTEM')
+                                        ? 'text-cyan-400 font-bold'
+                                        : log.message.includes('Task Finished')
+                                        ? 'text-green-400 font-bold'
+                                        : log.level === 'error'
+                                        ? 'text-red-400/90'
+                                        : log.level === 'warning'
+                                        ? 'text-amber-400/90'
+                                        : log.level === 'agent'
+                                        ? 'text-cyan-400/90'
+                                        : 'text-white/70'
+                                    }`}
+                                  >
+                                    {log.message}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Right: Duration + Chevron */}
+                            <div className="flex items-center gap-3 shrink-0 pl-2">
+                              {duration && (
+                                <div className="flex items-center gap-1.5 opacity-60">
+                                  <Terminal size={12} className="text-white/40 hidden sm:block" />
+                                  <span className="text-white/40 text-[10px] font-mono whitespace-nowrap">
+                                    {duration}
+                                  </span>
+                                </div>
+                              )}
+                              <div className="w-5 h-5 flex items-center justify-center rounded hover:bg-white/5 transition-colors text-white/40">
+                                <ChevronRight
+                                  size={13}
+                                  className={`transition-transform duration-200 ${
+                                    isExpanded
+                                      ? 'rotate-90 text-cyan-400'
+                                      : 'text-white/30 group-hover/log:text-white/70'
+                                  }`}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Expandable Details (Input Payload / Response Output or Metadata Dump) */}
+                          {isExpanded && log.details && (
+                            <div className="mt-3 p-3.5 bg-black/50 rounded-xl border border-white/5 text-[9px] overflow-x-auto shadow-inner group-hover/log:border-white/10 transition-colors animate-in fade-in duration-200 space-y-3">
+                              {log.details.params &&
+                                Object.keys(log.details.params).length > 0 && (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5 text-white/30 text-[9px] uppercase font-bold tracking-[0.15em]">
+                                      <span className="w-1 h-1 bg-white/40 rounded-full" />
+                                      <span>Input Payload</span>
+                                    </div>
+                                    <div className="bg-[#0a0d10] rounded-lg p-2.5 border border-white/5 overflow-x-auto custom-scrollbar">
+                                      <pre className="text-[11px] font-mono text-white/60 leading-relaxed max-h-[140px] overflow-y-auto whitespace-pre-wrap break-all custom-scrollbar">
+                                        {typeof log.details.params === 'string'
+                                          ? log.details.params
+                                          : JSON.stringify(log.details.params, null, 2)}
+                                      </pre>
+                                    </div>
+                                  </div>
+                                )}
+
+                              {log.details.output !== undefined && (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5 text-j-cyan/50 text-[9px] uppercase font-bold tracking-[0.15em]">
+                                    <span className="w-1 h-1 bg-cyan-400 rounded-full" />
+                                    <span>Response Output</span>
+                                  </div>
+                                  <div className="bg-[#0a0d10] rounded-lg p-2.5 border border-j-cyan/20 overflow-x-auto custom-scrollbar">
+                                    <pre className="text-[11px] font-mono text-j-cyan/80 leading-relaxed max-h-[220px] overflow-y-auto whitespace-pre-wrap break-all custom-scrollbar">
+                                      {typeof log.details.output === 'string'
+                                        ? log.details.output
+                                        : JSON.stringify(log.details.output, null, 2)}
+                                    </pre>
+                                  </div>
+                                </div>
+                              )}
+
+                              {!log.details.params && log.details.output === undefined && (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 mb-2 opacity-30">
+                                    <span className="w-1 h-1 bg-cyan-400 rounded-full" />
+                                    <span className="uppercase tracking-widest font-bold text-[8px] text-cyan-300">
+                                      Metadata_Dump
+                                    </span>
+                                  </div>
+                                  <pre className="whitespace-pre-wrap text-j-cyan/70 font-mono text-[11px] leading-tight">
+                                    {typeof log.details === 'string'
+                                      ? log.details
+                                      : JSON.stringify(log.details, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Hover gradient on the right */}
+                          <div className="absolute right-0 top-0 bottom-0 w-[40px] bg-gradient-to-l from-j-cyan/[0.02] to-transparent opacity-0 group-hover/log:opacity-100 transition-opacity pointer-events-none" />
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
+              </div>
+
+              {/* Footer: AKKI SYSTEM + Events Count */}
+              <div className="px-5 py-3 bg-black/40 border-t border-white/5 flex items-center justify-between shrink-0 relative z-30">
+                <div className="flex items-center gap-4">
+                  <div className="flex gap-1.5 items-center">
+                    <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse shadow-[0_0_6px_rgba(34,211,238,0.6)]" />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/80">
+                      AKKI SYSTEM
+                    </span>
+                    <span className="text-[8px] font-bold text-white/20 uppercase tracking-widest">
+                      Awaiting Command...
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="text-[9px] font-black font-mono text-cyan-400/60 uppercase tracking-tighter">
+                    {filteredLogs.length} EVENTS
+                  </div>
+                </div>
               </div>
             </div>
           </div>
