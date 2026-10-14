@@ -138,29 +138,68 @@ export class ToolRegistry {
     // 3. open_info_panel
     this.register({
       name: 'open_info_panel',
-      description: 'Display a structured research, market, or news summary in a floating native info window.',
-      execute: async ({ panel_id, title, color, body }: any) => {
+      description:
+        'Open a premium glassmorphic info display panel (HUD window) to print structured text, news feeds, weather updates, system logs, research details, or lists in markdown format. Use this heavily whenever the user asks for complex/detailed information (e.g., from web search, news, forecast, code snippets, or system diagnostics) that is easier to read than just listen to. Since this panel is temporary, opening it to show structured data is highly recommended most of the time to enhance user understanding.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          panel_id: {
+            type: 'STRING',
+            description: 'A unique identifier for the panel (e.g. "weather-hub", "news-headlines", "diagnostic-logs").',
+          },
+          title: {
+            type: 'STRING',
+            description: 'Title of the panel displayed in the header.',
+          },
+          content: {
+            type: 'STRING',
+            description: 'The content to display/print in Markdown format. Support tables, headers, lists, and bold text for rich styling.',
+          },
+          theme: {
+            type: 'STRING',
+            description: 'The color theme glow of the panel. Allowed values: "cyan", "amber", "crimson", "emerald", "blue". Default is "cyan".',
+            enum: ['cyan', 'amber', 'crimson', 'emerald', 'blue'],
+          },
+        },
+        required: ['panel_id', 'title', 'content'],
+      },
+      execute: async ({ panel_id, title, color, body, content, theme }: any) => {
         const id = panel_id || 'market_summary';
-        const panelTitle = title || 'Market Intelligence & Breakdown';
-        const theme = color || 'cyan';
-        const content = body || 'No content provided.';
+        const panelTitle = title || 'Information Panel';
+        const panelTheme = (['cyan', 'amber', 'crimson', 'emerald', 'blue'].includes(theme || color)
+          ? theme || color
+          : 'cyan') as any;
+        const panelContent = content || body || 'No content provided.';
         await this.infoPanelManager.openPanel({
           panelId: id,
           title: panelTitle,
-          theme: theme,
-          content: content,
+          theme: panelTheme,
+          content: panelContent,
         });
-        return { success: true, panelId: id, theme };
+        return { success: true, panelId: id, theme: panelTheme };
       },
     });
 
     // 4. close_panel
     this.register({
       name: 'close_panel',
-      description: 'Close an open native floating info panel by ID.',
+      description:
+        'Close an active panel by its ID, such as the built-in media player or any dynamic info panels.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          panel_id: {
+            type: 'STRING',
+            description:
+              'The ID of the panel to close. Set to "media-player" to close the active YouTube player, "all" to close all active info panels, or specify the panel_id of the info panel you want to close.',
+          },
+        },
+        required: ['panel_id'],
+      },
       execute: async ({ panel_id }: any) => {
-        this.infoPanelManager.closePanel(panel_id);
-        return { success: true, panelId: panel_id };
+        const id = panel_id || 'all';
+        this.infoPanelManager.closePanel(id);
+        return { success: true, panelId: id };
       },
     });
 

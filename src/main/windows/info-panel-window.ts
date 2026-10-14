@@ -4,6 +4,7 @@
 
 import { BrowserWindow, shell } from 'electron';
 import type { InfoPanelPayload } from '../../shared/types';
+import { getMainWindow } from './main-window';
 
 interface ThemeConfig {
   primary: string;
@@ -68,7 +69,24 @@ function formatInline(text: string): string {
     /`([^`]+)`/g,
     '<code style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; padding: 1px 5px; font-size: 11px; font-family: monospace; color: #38bdf8;">$1</code>'
   );
+  escaped = escaped.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline; text-underline-offset: 2px;">$1</a>'
+  );
   return escaped;
+}
+
+function parseTableCells(line: string): string[] {
+  let trimmed = line.trim();
+  if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+  if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+  return trimmed.split('|').map((c) => c.trim());
+}
+
+function isTableDelimiter(line: string): boolean {
+  const cells = parseTableCells(line);
+  if (cells.length === 0) return false;
+  return cells.every((c) => /^:?-+:?$/.test(c));
 }
 
 function renderSafeMarkdown(content: string, primaryColor: string): string {
@@ -78,7 +96,9 @@ function renderSafeMarkdown(content: string, primaryColor: string): string {
   let codeBlockBuffer: string[] = [];
   let inList = false;
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
     if (line.trim().startsWith('```')) {
       if (inCodeBlock) {
         const codeContent = escapeHtml(codeBlockBuffer.join('\n'));
@@ -104,6 +124,60 @@ function renderSafeMarkdown(content: string, primaryColor: string): string {
 
     const trimmed = line.trim();
 
+    // Table detection: line contains '|' and the following line is a table delimiter
+    if (
+      trimmed.includes('|') &&
+      i + 1 < lines.length &&
+      isTableDelimiter(lines[i + 1])
+    ) {
+      if (inList) {
+        renderedLines.push('</ul>');
+        inList = false;
+      }
+      const headers = parseTableCells(trimmed);
+      i++; // Skip the delimiter line
+      const rows: string[][] = [];
+
+      while (i + 1 < lines.length) {
+        const nextLine = lines[i + 1].trim();
+        if (!nextLine.includes('|') || nextLine === '') {
+          break;
+        }
+        i++;
+        rows.push(parseTableCells(lines[i]));
+      }
+
+      const theadHtml = `<thead><tr style="background: rgba(255, 255, 255, 0.03); border-bottom: 1px solid rgba(255, 255, 255, 0.08);">${headers
+        .map(
+          (h) =>
+            `<th style="padding: 10px 14px; font-weight: 600; font-family: monospace; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: ${primaryColor}; text-align: left;">${formatInline(
+              h
+            )}</th>`
+        )
+        .join('')}</tr></thead>`;
+
+      const tbodyHtml = `<tbody>${rows
+        .map(
+          (row, rIdx) =>
+            `<tr style="background: ${
+              rIdx % 2 === 1 ? 'rgba(255, 255, 255, 0.015)' : 'transparent'
+            }; border-bottom: 1px solid rgba(255, 255, 255, 0.03);">${row
+              .map(
+                (cell) =>
+                  `<td style="padding: 8px 14px; font-size: 12px; color: rgba(255, 255, 255, 0.7); font-weight: 300; line-height: 1.6;">${formatInline(
+                    cell
+                  )}</td>`
+              )
+              .join('')}</tr>`
+        )
+        .join('')}</tbody>`;
+
+      renderedLines.push(
+        `<div style="margin: 16px 0; overflow-x: auto; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.06); background: rgba(0, 0, 0, 0.35); box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);"><table style="width: 100%; border-collapse: collapse; text-align: left;">${theadHtml}${tbodyHtml}</table></div>`
+      );
+      continue;
+    }
+
     if (trimmed.startsWith('# ')) {
       if (inList) {
         renderedLines.push('</ul>');
@@ -120,7 +194,7 @@ function renderSafeMarkdown(content: string, primaryColor: string): string {
         inList = false;
       }
       renderedLines.push(
-        `<h2 style="font-size: 15px; font-weight: 600; color: #f1f5f9; margin: 14px 0 6px 0; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 4px;">${formatInline(
+        `<h2 style="font-size: 15px; font-weight: 600; color: #f1f5f9; margin: 14px 0 6px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 4px;">${formatInline(
           trimmed.slice(3)
         )}</h2>`
       );
@@ -197,7 +271,7 @@ function generatePanelHtml(payload: InfoPanelPayload): string {
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-      background: #000000;
+      background: transparent;
       color: #e2e8f0;
       height: 100vh;
       overflow: hidden;
@@ -290,6 +364,7 @@ function generatePanelHtml(payload: InfoPanelPayload): string {
       box-shadow: 0 0 10px rgba(255, 0, 85, 0.5);
     }
     .hud-body {
+      -webkit-app-region: no-drag;
       flex: 1;
       padding: 16px 20px;
       overflow-y: auto;
@@ -355,6 +430,16 @@ export class InfoPanelWindowManager {
   private panels = new Map<string, { window: BrowserWindow | null; payload: InfoPanelPayload }>();
 
   public async openPanel(payload: InfoPanelPayload): Promise<void> {
+    // SINGLETON ENFORCEMENT: Close all other active info panels to prevent stacking
+    for (const [existingId, entry] of this.panels.entries()) {
+      if (existingId !== payload.panelId) {
+        if (entry.window && !entry.window.isDestroyed()) {
+          entry.window.close();
+        }
+        this.panels.delete(existingId);
+      }
+    }
+
     const existing = this.panels.get(payload.panelId);
 
     if (existing && existing.window && !existing.window.isDestroyed()) {
@@ -371,15 +456,20 @@ export class InfoPanelWindowManager {
     }
 
     try {
-      // Create new floating frameless HUD window
+      // Cascade panels slightly so multiple HUDs don't stack exactly on top of each other
+      const offset = (this.panels.size % 5) * 30;
+
+      // Create new floating frameless HUD window (760x580 parity with reference app)
       const win = new BrowserWindow({
-        width: 540,
-        height: 660,
-        minWidth: 380,
-        minHeight: 320,
+        width: 760,
+        height: 580,
+        x: 120 + offset,
+        y: 90 + offset,
+        minWidth: 400,
+        minHeight: 300,
         frame: false,
         transparent: true,
-        backgroundColor: '#0c0a1a',
+        backgroundColor: '#00000000',
         hasShadow: true,
         alwaysOnTop: true,
         skipTaskbar: false,
@@ -402,7 +492,12 @@ export class InfoPanelWindowManager {
       });
 
       // Deny popup windows
-      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      win.webContents.setWindowOpenHandler(({ url }) => {
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          shell.openExternal(url);
+        }
+        return { action: 'deny' };
+      });
 
       // Track instance
       this.panels.set(payload.panelId, { window: win, payload });
@@ -421,8 +516,24 @@ export class InfoPanelWindowManager {
   }
 
   public closePanel(panelId?: string): boolean {
-    if (!panelId) {
+    if (!panelId || panelId === 'all') {
       this.closeAllPanels();
+      return true;
+    }
+
+    if (panelId === 'visual_hub') {
+      const mainWin = getMainWindow();
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('restore-visual-hub');
+      }
+      return true;
+    }
+
+    if (panelId === 'media-player') {
+      const mainWin = getMainWindow();
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('close-media-player');
+      }
       return true;
     }
 

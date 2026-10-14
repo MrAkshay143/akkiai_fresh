@@ -1697,8 +1697,8 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     await ctx.infoPanelManager.openPanel({ panelId, title, theme, content });
     return true;
   });
-  ipcMain.handle('close-info-panel', (_event, panelId?: string) => ctx.infoPanelManager.closePanel(panelId || 'market_summary'));
-  ipcMain.handle('get-info-panel-data', (_event, panelId?: string) => ctx.infoPanelManager.getPanelData(panelId || 'market_summary'));
+  ipcMain.handle('close-info-panel', (_event, panelId?: string) => ctx.infoPanelManager.closePanel(panelId));
+  ipcMain.handle('get-info-panel-data', (_event, panelId?: string) => ctx.infoPanelManager.getPanelData(panelId || 'market_summary') || null);
   const widgetWindows = new Map<string, BrowserWindow>();
 
   ipcMain.handle(
