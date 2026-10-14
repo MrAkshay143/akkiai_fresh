@@ -44,6 +44,22 @@ export class AIService {
     this.geminiService.setOpenRouterKey(key);
   }
 
+  public setOpenAiKey(key: string): void {
+    this.geminiService.setOpenAiKey(key);
+  }
+
+  public setCodexKey(key: string): void {
+    this.geminiService.setCodexKey(key);
+  }
+
+  public setProvider(provider: 'gemini' | 'openrouter' | 'openai-codex'): void {
+    this.geminiService.setProvider(provider);
+  }
+
+  public getProvider(): string {
+    return this.geminiService.getProvider();
+  }
+
   public setPrimaryModel(model: string): void {
     this.geminiService.setPrimaryModel(model);
   }
@@ -81,11 +97,15 @@ export class AIService {
     const settings = this.currentSettings ? this.currentSettings() : undefined;
     const apiKey = (payload.options?.geminiApiKey as string) || settings?.geminiApiKey;
     const openRouterKey = (payload.options?.openRouterApiKey as string) || settings?.openRouterApiKey;
+    const openAiKey = (payload.options?.openAiApiKey as string) || (payload.options?.openaiKey as string);
+    const provider = (payload.options?.provider as any) || settings?.primaryProvider;
     let model = resolveActiveModel(payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel, DEFAULT_MODELS.primary);
     const persona = settings?.selectedPersona || 'caring_companion';
 
     if (apiKey) this.geminiService.setApiKey(apiKey);
     if (openRouterKey) this.geminiService.setOpenRouterKey(openRouterKey);
+    if (openAiKey) this.geminiService.setOpenAiKey(openAiKey);
+    if (provider) this.geminiService.setProvider(provider);
 
     // Build rich system instruction with Persona + Long-term Memory
     const fullSystemInstruction = payload.systemInstruction || this.personaService.buildSystemPrompt({
@@ -111,6 +131,7 @@ export class AIService {
       prompt: payload.prompt,
       messages,
       model,
+      provider,
       systemInstruction: fullSystemInstruction,
       toolRegistry: activeRegistry,
       tools: payload.tools,

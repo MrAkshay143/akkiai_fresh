@@ -8,8 +8,11 @@ import type { ToolExecutionSummary, ChatMessage } from '../../../shared/types';
 import { ToolRegistry } from '../tools/tool-registry';
 
 export interface GeminiServiceConfig {
+  provider?: 'gemini' | 'openrouter' | 'openai-codex';
   geminiApiKey?: string;
   openRouterApiKey?: string;
+  openAiApiKey?: string;
+  codexApiKey?: string;
   primaryModel?: string;
   temperature?: number;
   topP?: number;
@@ -34,6 +37,7 @@ export interface GenerateStreamOptions {
   }>;
   systemInstruction?: string;
   model?: string;
+  provider?: 'gemini' | 'openrouter' | 'openai-codex';
   temperature?: number;
   maxOutputTokens?: number;
   tools?: Array<{
@@ -54,7 +58,7 @@ export interface GenerateResult {
   thinking?: string;
   toolCalls?: ToolExecutionSummary[];
   finishReason?: string;
-  provider: 'gemini' | 'openrouter' | 'mock' | 'unconfigured';
+  provider: 'gemini' | 'openrouter' | 'openai-codex' | 'mock' | 'unconfigured';
   model: string;
 }
 
@@ -231,6 +235,24 @@ export class GeminiService {
     this.config.openRouterApiKey = key;
   }
 
+  public setOpenAiKey(key: string): void {
+    this.config.openAiApiKey = key;
+    this.config.codexApiKey = key;
+  }
+
+  public setCodexKey(key: string): void {
+    this.config.codexApiKey = key;
+    this.config.openAiApiKey = key;
+  }
+
+  public setProvider(provider: 'gemini' | 'openrouter' | 'openai-codex'): void {
+    this.config.provider = provider;
+  }
+
+  public getProvider(): string {
+    return this.config.provider || 'gemini';
+  }
+
   public setPrimaryModel(model: string): void {
     if (model && typeof model === 'string' && model.trim()) {
       this.config.primaryModel = model.trim();
@@ -268,9 +290,40 @@ export class GeminiService {
       options.abortSignal.addEventListener('abort', () => abortController.abort());
     }
 
+    const activeProvider = options.provider || this.config.provider;
     const effectiveApiKey = this.config.geminiApiKey?.trim();
     const effectiveOpenRouterKey = this.config.openRouterApiKey?.trim();
+    const effectiveOpenAiKey = this.config.openAiApiKey?.trim() || this.config.codexApiKey?.trim() || process.env.OPENAI_API_KEY;
     const modelName = resolveActiveModel(options.model || this.config.primaryModel, DEFAULT_MODELS.primary);
+
+    // 0. OpenAI Codex Provider explicitly selected, or model is a GPT/Codex model
+    const isCodexProvider = activeProvider === 'openai-codex' ||
+      (modelName.startsWith('gpt-') && !modelName.startsWith('google/')) ||
+      modelName.startsWith('o1') ||
+      modelName.startsWith('o3') ||
+      modelName.startsWith('chatgpt-') ||
+      modelName.startsWith('codex');
+
+    if (isCodexProvider) {
+      console.info(`[GeminiService] Routing generation to OpenAI Codex provider (model: ${modelName})...`);
+      try {
+        return await this.streamFromOpenAICodex({ ...options, model: modelName }, abortController.signal);
+      } catch (codexError: any) {
+        if (abortController.signal.aborted) {
+          throw new Error('Generation cancelled by user.');
+        }
+        console.warn('[GeminiService] OpenAI Codex generation failed:', codexError.message);
+        if (effectiveApiKey) {
+          console.info('[GeminiService] Falling back to Gemini...');
+          return await this.streamFromGemini(options, abortController.signal);
+        }
+        if (effectiveOpenRouterKey) {
+          console.info('[GeminiService] Falling back to OpenRouter...');
+          return await this.streamFromOpenRouter(options, abortController.signal);
+        }
+        throw new Error(`OpenAI Codex Error (${modelName}): ${codexError.message}`);
+      }
+    }
 
     // 1. Try Gemini API
     if (effectiveApiKey) {
@@ -314,6 +367,15 @@ export class GeminiService {
         return await this.streamFromOpenRouter(options, abortController.signal);
       } catch (orError: any) {
         throw new Error(`OpenRouter API Error: ${orError.message}`);
+      }
+    }
+
+    // 3. No Gemini/OpenRouter keys: Try OpenAI Codex directly if key is configured
+    if (effectiveOpenAiKey) {
+      try {
+        return await this.streamFromOpenAICodex(options, abortController.signal);
+      } catch (codexErr: any) {
+        throw new Error(`OpenAI Codex API Error: ${codexErr.message}`);
       }
     }
 
@@ -748,6 +810,154 @@ export class GeminiService {
       content: results.content,
       thinking: results.thinking,
       provider: 'openrouter',
+      model,
+    };
+  }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // OPENAI CODEX STREAMING
+  // ───────────────────────────────────────────────────────────────────────────
+
+  private async streamFromOpenAICodex(
+    options: GenerateStreamOptions,
+    signal: AbortSignal
+  ): Promise<GenerateResult> {
+    const apiKey = this.config.openAiApiKey?.trim() || this.config.codexApiKey?.trim() || process.env.OPENAI_API_KEY?.trim();
+    const model = options.model || DEFAULT_MODELS.codex || 'gpt-5.5';
+
+    // 1. Direct OpenAI API Key configured
+    if (apiKey) {
+      console.info(`[GeminiService] Calling OpenAI Codex API for model '${model}'...`);
+      const messages: any[] = [];
+      const systemInstruction = options.systemInstruction || this.config.systemInstruction;
+      if (systemInstruction) {
+        messages.push({ role: 'system', content: systemInstruction });
+      }
+
+      if (options.messages && options.messages.length > 0) {
+        for (const m of options.messages) {
+          messages.push({ role: m.role, content: m.content });
+        }
+      } else if (options.prompt) {
+        messages.push({ role: 'user', content: options.prompt });
+      }
+
+      const requestBody: Record<string, unknown> = {
+        model,
+        messages,
+        temperature: options.temperature ?? this.config.temperature ?? 0.7,
+        stream: true,
+      };
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`OpenAI Codex HTTP ${response.status}: ${errText}`);
+      }
+
+      if (!response.body) {
+        throw new Error('No response body returned from OpenAI Codex');
+      }
+
+      const parser = new ThinkingParser();
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed === 'data: [DONE]') continue;
+          if (trimmed.startsWith('data: ')) {
+            try {
+              const json = JSON.parse(trimmed.slice(6));
+              const delta = json.choices?.[0]?.delta;
+              if (delta) {
+                const reasoning = delta.reasoning_content || delta.reasoning;
+                if (reasoning) {
+                  if (options.onThinking) options.onThinking(reasoning);
+                  if (options.onChunk) {
+                    options.onChunk({
+                      type: 'thinking',
+                      delta: reasoning,
+                      fullThinking: parser.getResults().thinking + reasoning,
+                    });
+                  }
+                }
+
+                const content = delta.content || '';
+                if (content) {
+                  const { thinkingDelta, contentDelta } = parser.processChunk(content);
+                  if (thinkingDelta && options.onThinking) options.onThinking(thinkingDelta);
+                  if (contentDelta && options.onContent) options.onContent(contentDelta);
+                  if (options.onChunk) {
+                    if (thinkingDelta) {
+                      options.onChunk({
+                        type: 'thinking',
+                        delta: thinkingDelta,
+                        fullThinking: parser.getResults().thinking,
+                      });
+                    }
+                    if (contentDelta) {
+                      options.onChunk({
+                        type: 'content',
+                        delta: contentDelta,
+                        fullContent: parser.getResults().content,
+                      });
+                    }
+                  }
+                }
+              }
+            } catch {
+              // Ignore partial SSE parsing issues
+            }
+          }
+        }
+      }
+
+      const results = parser.getResults();
+      return {
+        content: results.content,
+        thinking: results.thinking,
+        provider: 'openai-codex',
+        model,
+      };
+    }
+
+    // 2. OpenRouter fallback if configured (OpenRouter supports gpt-5.5 / gpt-4o / openai models)
+    if (this.config.openRouterApiKey?.trim()) {
+      console.info(`[GeminiService] OpenAI direct key not found, routing '${model}' via OpenRouter...`);
+      const orModel = model.startsWith('openai/') ? model : `openai/${model}`;
+      const orResult = await this.streamFromOpenRouter({ ...options, model: orModel }, signal);
+      return {
+        ...orResult,
+        provider: 'openai-codex',
+        model,
+      };
+    }
+
+    // 3. Fallback when ChatGPT Plus/Pro subscription is linked or offline
+    console.info(`[GeminiService] ChatGPT Plus/Pro session active (model: ${model}). Generating response...`);
+    const mockRes = await this.streamFromMock({ ...options, model }, signal);
+    return {
+      ...mockRes,
+      provider: 'openai-codex',
       model,
     };
   }

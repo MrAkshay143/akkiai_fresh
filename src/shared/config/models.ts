@@ -16,6 +16,8 @@ export const DEFAULT_MODELS = {
   ttsFallback: 'gemini-3.8-flash',
   openRouterPrimary: 'google/gemini-3.5-flash',
   openRouterSubAgent: 'google/gemini-3.1-flash-lite',
+  codex: 'gpt-5.5',
+  openAiPrimary: 'gpt-4o',
 } as const;
 
 export const GEMINI_SPEAK_CHANNEL = 'gemini-speak';
@@ -47,6 +49,14 @@ export const GEMINI_MODEL_SUGGESTIONS = [
   'gemini-3.5-flash',
   'gemini-3-flash-preview',
   'gemini-3.1-pro-preview',
+] as const;
+
+export const OPENAI_CODEX_MODEL_SUGGESTIONS = [
+  'gpt-5.5',
+  'gpt-4o',
+  'gpt-4o-mini',
+  'o1',
+  'o3-mini',
 ] as const;
 
 export const TOOL_CONFIG_AVAILABLE_MODELS = [
