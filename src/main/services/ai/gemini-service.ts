@@ -205,7 +205,7 @@ export class GeminiService {
 
   constructor(config: GeminiServiceConfig = {}, toolRegistry?: ToolRegistry) {
     this.config = {
-      primaryModel: 'gemini-3.8-flash',
+      primaryModel: 'gemini-2.5-flash',
       temperature: 0.7,
       topP: 0.95,
       maxOutputTokens: 4096,
@@ -237,7 +237,7 @@ export class GeminiService {
   }
 
   public getPrimaryModel(): string {
-    return this.config.primaryModel || 'gemini-3.8-flash';
+    return this.config.primaryModel || 'gemini-2.5-flash';
   }
 
   public cancelStream(): void {
@@ -269,7 +269,7 @@ export class GeminiService {
 
     const effectiveApiKey = this.config.geminiApiKey?.trim();
     const effectiveOpenRouterKey = this.config.openRouterApiKey?.trim();
-    const modelName = options.model || this.config.primaryModel || 'gemini-3.8-flash';
+    const modelName = options.model || this.config.primaryModel || 'gemini-2.5-flash';
 
     // 1. Try Gemini API
     if (effectiveApiKey) {
@@ -344,7 +344,7 @@ export class GeminiService {
     signal: AbortSignal
   ): Promise<GenerateResult> {
     const apiKey = this.config.geminiApiKey!;
-    const modelName = options.model || this.config.primaryModel || 'gemini-3.8-flash';
+    const modelName = options.model || this.config.primaryModel || 'gemini-2.5-flash';
     const ai = new GoogleGenAI({ apiKey });
 
     // Prepare contents
@@ -449,11 +449,28 @@ export class GeminiService {
       turn++;
       const currentTurnFunctionCalls: Array<{ name: string; args: Record<string, any> }> = [];
 
-      const streamResponse = await ai.models.generateContentStream({
-        model: modelName,
-        contents,
-        config: genConfig,
-      });
+      const candidateModels = [modelName, 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash'].filter((v, i, a) => a.indexOf(v) === i);
+      let streamResponse: any = null;
+      let lastStreamErr: any = null;
+
+      for (const candidate of candidateModels) {
+        try {
+          streamResponse = await ai.models.generateContentStream({
+            model: candidate,
+            contents,
+            config: genConfig,
+          });
+          break;
+        } catch (err: any) {
+          lastStreamErr = err;
+          console.warn(`[GeminiService] Model ${candidate} stream failed, trying fallback:`, err.message);
+          if (signal.aborted) throw err;
+        }
+      }
+
+      if (!streamResponse) {
+        throw lastStreamErr || new Error(`Google Gemini stream failed for all candidate models`);
+      }
 
       for await (const chunk of streamResponse) {
         if (signal.aborted) {

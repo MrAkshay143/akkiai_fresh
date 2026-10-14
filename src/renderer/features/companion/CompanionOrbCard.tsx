@@ -131,7 +131,7 @@ export const CompanionOrbCard: React.FC<CompanionOrbCardProps> = ({
           </div>
         ) : (
           <div className="pointer-events-none w-full flex justify-center">
-            <NexusAvatarView
+            <HolographicOrb
               isSpeaking={isAISpeaking}
               isConnected={isOnline}
               isConnecting={isConnecting}

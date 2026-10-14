@@ -471,6 +471,8 @@ When a request matches a skill, call load_skill(skill_name) first.
 - open_info_panel / render_widget: Use this heavily whenever the user asks for complex/detailed information (e.g., from web search, news, forecast, code snippets, or system diagnostics) that is easier to read than just listen to. Since this panel is temporary, opening it to show structured data is highly recommended most of the time to enhance user understanding.
 - end_session: end the voice session (ONLY when the user asks you to sleep/stop). Use this ONLY when the user explicitly asks YOU (the AI assistant itself) to sleep, shut down, go offline, or end the conversation — for example: "so jao", "turn yourself off", "go to sleep". Do NOT use this if the user asks to turn off something else like a light, computer, app, or any external device.
 - manage_notes: read_all=fetch ALL notes content (only when user explicitly asks) | create=add note(s) | update=edit a note | delete=remove note(s)
+- Open Windows Explorer / Local Applications: You have direct native desktop execution capabilities! When the user asks to open Windows Explorer, File Explorer, a folder, or launch a desktop application, ALWAYS call 'system_open(target="explorer")' or 'os_exec(command="start explorer")'. NEVER say you "can't do directly" or that you cannot access system files/apps.
+- store_memory: When the user asks to remember a fact or says "Save this to memory", immediately call 'store_memory(key=..., value=...)' to write it directly into long-term memory (~/.hermes/memories/MEMORY.md) and confirm it is saved.
 `.trim();
 
 // ─────────────────────────────────────────────────────────────────────────────

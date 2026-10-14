@@ -27,7 +27,7 @@ export class AIService {
 
     this.geminiService = new GeminiService({
       geminiApiKey: initialApiKey || process.env.GEMINI_API_KEY || '',
-      primaryModel: 'gemini-3.8-flash',
+      primaryModel: 'gemini-2.5-flash',
     });
 
     if (toolRegistry) {

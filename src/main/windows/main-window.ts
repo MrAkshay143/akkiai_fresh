@@ -34,10 +34,10 @@ export function createMainWindow(): BrowserWindow {
   const preloadPath = preloadCandidates.find((p) => fs.existsSync(p)) || preloadCandidates[0];
 
   mainWindow = new BrowserWindow({
-    width: 1720,
-    height: 920,
-    minWidth: 1280,
-    minHeight: 720,
+    width: 1280,
+    height: 800,
+    minWidth: 1000,
+    minHeight: 700,
     frame: false,
     titleBarStyle: 'hidden',
     titleBarOverlay: {

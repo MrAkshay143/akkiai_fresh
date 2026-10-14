@@ -147,7 +147,9 @@ if (!gotTheLock) {
           'firebase_session.json',
           'firebase_credential.bin',
           'theme.json',
-          'voice_assistant_mode.json',
+          'tasks.json',
+          'notes.json',
+          'chats.json',
           'guide_seen.json',
           'setup_guide_seen.json',
         ];
@@ -210,7 +212,7 @@ if (!gotTheLock) {
     // Update settingsStore with loaded keys and modern model
     settingsStore.update((current) => ({
       ...current,
-      primaryModel: current.primaryModel || 'gemini-3.8-flash',
+      primaryModel: current.primaryModel || 'gemini-2.5-flash',
       geminiApiKey: initialGeminiKey || current.geminiApiKey,
       openRouterApiKey: initialOpenRouterKey || current.openRouterApiKey,
       huggingFaceApiKey: initialHfKey || current.huggingFaceApiKey,
