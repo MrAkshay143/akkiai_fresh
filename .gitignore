@@ -20,3 +20,6 @@ firebase_config.json
 *.log
 .DS_Store
 Thumbs.db
+rea_*.json
+parity_audit_results.json
+bundle_tools_extracted.json
