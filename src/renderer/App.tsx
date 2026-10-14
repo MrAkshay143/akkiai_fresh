@@ -18,6 +18,32 @@ import { audioPlayer } from '@/services/audio-player';
 import { GEMINI_SPEAK_CHANNEL } from '@shared/config/models';
 
 export const App: React.FC = () => {
+  // Standalone Floating Window Mode (e.g. ?mode=player&videoId=...)
+  const isFloatingPlayer = React.useMemo(() => {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const hashParams = new URLSearchParams(
+        window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
+      );
+      const mode = searchParams.get('mode') || hashParams.get('mode');
+      const vid = searchParams.get('videoId') || hashParams.get('videoId');
+      if (mode === 'player' && vid) return vid;
+    } catch {}
+    return null;
+  }, []);
+
+  if (isFloatingPlayer) {
+    return (
+      <div className="w-screen h-screen bg-[#0B141B] overflow-hidden">
+        <MediaPlayerPopup
+          videoId={isFloatingPlayer}
+          onClose={() => (window as any).electronAPI?.invoke('close-window')}
+          isFloatingWindow
+        />
+      </div>
+    );
+  }
+
   const [isBooting, setIsBooting] = React.useState(true);
   const {
     centerView,
@@ -161,6 +187,8 @@ export const App: React.FC = () => {
     }
 
     // Sync initial state from electron main store if available
+    let unPlay: (() => void) | undefined;
+    let unClose: (() => void) | undefined;
     if ((window as any).electronAPI) {
       const api = (window as any).electronAPI;
       api.loadTasks?.().then((t: any) => Array.isArray(t) && t.length > 0 && setTasks(t));
@@ -168,6 +196,15 @@ export const App: React.FC = () => {
       api.loadChats?.().then((c: any) => Array.isArray(c) && c.length > 0 && setMessages(c));
       api.loadSettings?.().then((s: any) => s && updateSettings(s));
       api.getAgentStates?.().then((a: any) => Array.isArray(a) && a.length > 0 && setSubAgents(a));
+
+      if (api.on) {
+        unPlay = api.on('play-video', (vid: string) => {
+          if (vid) setActiveVideoId(vid);
+        });
+        unClose = api.on('close-media-player', () => {
+          setActiveVideoId(null);
+        });
+      }
     }
     // Check setup walkthrough status
     if ((window as any).electronAPI?.invoke) {
@@ -183,6 +220,11 @@ export const App: React.FC = () => {
           console.warn('[App] Failed to check guide-should-show:', err);
         });
     }
+
+    return () => {
+      unPlay?.();
+      unClose?.();
+    };
   }, []);
 
 

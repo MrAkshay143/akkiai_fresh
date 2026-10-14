@@ -26,6 +26,7 @@ import { ToolRegistry } from '../services/tools/tool-registry';
 import { AIService } from '../services/ai/ai-service';
 import { AgentCoordinator } from '../services/agents/agent-coordinator';
 import { InfoPanelWindowManager } from '../windows/info-panel-window';
+import { createVideoWindow, controlVideoWindows, closeAllVideoWindows } from '../windows/video-window';
 import {
   minimizeMainWindow,
   toggleMaximizeMainWindow,
@@ -1245,13 +1246,49 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return { success: true };
   });
 
-  ipcMain.handle('close-window', () => closeMainWindow());
-  ipcMain.handle('minimize-window', () => minimizeMainWindow());
-  ipcMain.handle('maximize-window', () => toggleMaximizeMainWindow());
-  ipcMain.handle('fullscreen-window', () => {
-    const win = BrowserWindow.getFocusedWindow();
-    if (win) win.setFullScreen(!win.isFullScreen());
-    return true;
+  ipcMain.handle('close-window', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.close();
+      return true;
+    }
+    return closeMainWindow();
+  });
+  ipcMain.handle('minimize-window', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      win.minimize();
+      return true;
+    }
+    return minimizeMainWindow();
+  });
+  ipcMain.handle('maximize-window', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      if (win.isMaximized()) {
+        win.unmaximize();
+        return false;
+      } else {
+        win.maximize();
+        return true;
+      }
+    }
+    return toggleMaximizeMainWindow();
+  });
+  ipcMain.handle('fullscreen-window', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      const nextState = !win.isFullScreen();
+      win.setFullScreen(nextState);
+      return nextState;
+    }
+    const focused = BrowserWindow.getFocusedWindow();
+    if (focused && !focused.isDestroyed()) {
+      const nextState = !focused.isFullScreen();
+      focused.setFullScreen(nextState);
+      return nextState;
+    }
+    return false;
   });
 
   ipcMain.handle('web-search', async (_event, { query }: any) => {
@@ -1685,10 +1722,35 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   // ── 19. Media & Info Panel Aliases ────────────────────────────────────────
   ipcMain.handle('play-youtube-video', async (_event, queryOrObj: any = {}) => {
-    const query = typeof queryOrObj === 'string' ? queryOrObj : (queryOrObj?.query || queryOrObj?.url || 'lofi beats');
-    return await ctx.toolRegistry.execute('play_youtube_video', { query });
+    let videoId = '';
+    if (typeof queryOrObj === 'string') {
+      if (/^[a-zA-Z0-9_-]{11}$/.test(queryOrObj)) {
+        videoId = queryOrObj;
+      }
+    } else if (queryOrObj?.videoId) {
+      videoId = queryOrObj.videoId;
+    }
+
+    if (!videoId) {
+      const query = typeof queryOrObj === 'string' ? queryOrObj : (queryOrObj?.query || queryOrObj?.url || 'lofi beats');
+      const res = await ctx.toolRegistry.execute('play_youtube_video', { query });
+      if (res?.videoId) {
+        videoId = res.videoId;
+      }
+    }
+
+    if (videoId) {
+      createVideoWindow(videoId);
+      return true;
+    }
+    return false;
   });
-  ipcMain.handle('control-media-player', (_event, { action, data }: any) => ({ success: true, action, data }));
+
+  ipcMain.handle('control-media-player', async (_event, payload: any) => {
+    const action = typeof payload === 'string' ? payload : (payload?.action || '');
+    const value = typeof payload === 'object' && payload ? (payload.value !== undefined ? payload.value : payload.data) : undefined;
+    return controlVideoWindows(action, value);
+  });
   ipcMain.handle('open-info-panel', async (_event, payload: any) => {
     const panelId = payload?.panelId || payload?.id || 'market_summary';
     const title = payload?.title || 'System Information';

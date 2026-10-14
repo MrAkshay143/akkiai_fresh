@@ -5,6 +5,8 @@ import { clipboard, Notification, app, shell, BrowserWindow } from 'electron';
 import { MemoryService } from '../memory/memory-service';
 import { AgentCoordinator } from '../agents/agent-coordinator';
 import { InfoPanelWindowManager } from '../../windows/info-panel-window';
+import { createVideoWindow, controlVideoWindows } from '../../windows/video-window';
+import { getMainWindow } from '../../windows/main-window';
 import { hardwareService } from '../hardware/hardware-service';
 import { whatsAppManager } from '../whatsapp/whatsapp-manager';
 import { browserManager } from './browser-manager';
@@ -817,9 +819,22 @@ export class ToolRegistry {
     // 20. play_youtube_video
     this.register({
       name: 'play_youtube_video',
-      description: "Search YouTube and play a video inside the app's built-in media player overlay.",
+      description:
+        "Search YouTube and play a video inside the app's built-in media player. The video opens in an embedded overlay without leaving the app. Use this when the user asks to play, watch, or listen to any video or song.",
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          query: {
+            type: 'STRING',
+            description:
+              'The search query or video title to find on YouTube. Be specific for better results (e.g. "Dua Lipa Levitating official video", "lofi hip hop study music").',
+          },
+        },
+        required: ['query'],
+      },
       execute: async ({ query }: { query?: string }) => {
         if (!query) throw new Error('Search query or video title required');
+        let videoId = 's41eL_6o1Z8';
         try {
           const res = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
@@ -827,22 +842,25 @@ export class ToolRegistry {
           const html = await res.text();
           const match = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/);
           if (match && match[1]) {
-            const videoId = match[1];
-            return {
-              success: true,
-              query,
-              videoId,
-              videoTitle: query,
-              url: `https://www.youtube.com/watch?v=${videoId}`,
-            };
+            videoId = match[1];
           }
         } catch (_) {}
+
+        // Launch dedicated floating 800x500 video window (exact parity with old app)
+        createVideoWindow(videoId);
+
+        // Also notify main window for overlay mode
+        const mainWin = getMainWindow();
+        if (mainWin && !mainWin.isDestroyed()) {
+          mainWin.webContents.send('play-video', videoId);
+        }
+
         return {
           success: true,
           query,
-          videoId: 's41eL_6o1Z8',
-          videoTitle: `${query} (Audio Stream)`,
-          url: 'https://www.youtube.com/watch?v=s41eL_6o1Z8',
+          videoId,
+          videoTitle: query,
+          url: `https://www.youtube.com/watch?v=${videoId}`,
         };
       },
     });
@@ -1754,11 +1772,7 @@ export class ToolRegistry {
               parsedVal = String(mins * 60 + secs);
             }
           }
-          BrowserWindow.getAllWindows().forEach((win) => {
-            if (!win.isDestroyed()) {
-              win.webContents.send('media-player-control', { action, value: parsedVal });
-            }
-          });
+          controlVideoWindows(action, parsedVal);
           return {
             success: true,
             result: `Player action '${action}' executed successfully.`,

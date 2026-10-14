@@ -5,6 +5,7 @@
 import { BrowserWindow, shell } from 'electron';
 import type { InfoPanelPayload } from '../../shared/types';
 import { getMainWindow } from './main-window';
+import { closeAllVideoWindows } from './video-window';
 
 interface ThemeConfig {
   primary: string;
@@ -530,6 +531,7 @@ export class InfoPanelWindowManager {
     }
 
     if (panelId === 'media-player') {
+      closeAllVideoWindows();
       const mainWin = getMainWindow();
       if (mainWin && !mainWin.isDestroyed()) {
         mainWin.webContents.send('close-media-player');
