@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_MODELS } from '../../shared/config/models';
 import {
   TaskItem,
   NoteItem,
@@ -321,7 +322,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   settings: {
-    primaryModel: 'gemini-3.5-flash-lite',
+    primaryModel: DEFAULT_MODELS.primary,
     geminiApiKey: '',
     openRouterApiKey: '',
     huggingFaceApiKey: '',

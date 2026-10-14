@@ -17,6 +17,7 @@ import {
   AssignAgentTaskSchema,
   InfoPanelSchema,
 } from '../../shared/schemas';
+import { DEFAULT_MODELS, AVAILABLE_MODELS, GEMINI_SPEAK_CHANNEL } from '../../shared/config/models';
 import { LocalStore } from '../services/storage/local-store';
 import { firebaseService } from '../services/auth/firebase-service';
 import express from 'express';
@@ -2044,7 +2045,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       apiKey: '',
       geminiApiKey: '',
       openRouterApiKey: '',
-      modelId: 'gemini-3.1-flash-lite',
+      modelId: DEFAULT_MODELS.agentTown,
     };
   });
 
@@ -2182,7 +2183,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     }
   });
 
-  ipcMain.handle('gemini-speak', async (_event, payload: { text: string; voice?: string }) => {
+  ipcMain.handle(GEMINI_SPEAK_CHANNEL, async (_event, payload: { text: string; voice?: string }) => {
     try {
       const apiKey = getSecretKeyFromDiskOrStore();
       if (!apiKey) return { success: false, error: 'No Gemini API key configured' };
@@ -2195,7 +2196,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       let response: any;
       try {
         response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash-tts',
+          model: DEFAULT_MODELS.tts,
           config: {
             responseModalities: ['AUDIO'],
             speechConfig: {
@@ -2215,7 +2216,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
         });
       } catch {
         response = await ai.models.generateContent({
-          model: 'gemini-3.8-flash',
+          model: DEFAULT_MODELS.ttsFallback,
           config: {
             responseModalities: ['AUDIO'],
             speechConfig: {
@@ -2335,13 +2336,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       try { customModels = JSON.parse(fs.readFileSync(customPath, 'utf8')); } catch {}
     }
 
-    const defaultGemini = [
-      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-      { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
-      { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
-      { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
-      { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
-    ];
+    const defaultGemini = [...AVAILABLE_MODELS.filter(m => !m.id.startsWith('google/'))];
     const defaultOpenRouter = [
       { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
       { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },

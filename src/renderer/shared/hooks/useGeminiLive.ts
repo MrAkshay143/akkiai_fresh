@@ -6,6 +6,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { useAppStore } from '@/state/useAppStore';
 import { useAudio } from '@/shared/hooks/useAudio';
+import { DEFAULT_MODELS } from '../../../shared/config/models';
 import type { ChatMessage, ToolTrace } from '../../../shared/types';
 
 // ── Audio Helpers from Legacy index-pSpzB4bE.js ──────────────────────────────
@@ -207,7 +208,7 @@ export function useGeminiLive() {
       // 5. Connect via GoogleGenAI Live Client
       const ai = new GoogleGenAI({ apiKey });
       const session = await ai.live.connect({
-        model: 'gemini-3.1-flash-live-preview',
+        model: DEFAULT_MODELS.live,
         config: {
           responseModalities: ['AUDIO' as any],
           speechConfig: {

@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import { app } from 'electron';
+import { DEFAULT_MODELS, TOOL_CONFIG_AVAILABLE_MODELS } from '../../../shared/config/models';
 
 const CONFIG_FILE = 'tools_config.json';
 const GEMINI_MODELS_CACHE = 'cached_gemini_models.json';
@@ -36,51 +37,51 @@ export interface ToolsConfig {
 export const DEFAULT_CONFIG: ToolsConfig = {
   version: 1,
   enableGlobalFallback: true,
-  defaultGlobalFallbackModel: 'gemini-3.5-flash-lite',
+  defaultGlobalFallbackModel: DEFAULT_MODELS.toolGlobal,
   tools: {
     web_search: {
-      model: 'gemini-3.5-flash-lite',
+      model: DEFAULT_MODELS.toolWebSearch,
       customModel: '',
       usePrimaryApiKey: true,
       customApiKey: '',
       enableFallback: true,
-      fallbackModel: 'gemini-3.5-flash-lite',
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       isRetired: false,
     },
     whatsapp_transcribe: {
-      model: 'gemini-3.8-flash',
+      model: DEFAULT_MODELS.toolWhatsapp,
       customModel: '',
       usePrimaryApiKey: true,
       customApiKey: '',
       enableFallback: true,
-      fallbackModel: 'gemini-3.5-flash-lite',
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       isRetired: false,
     },
     dashboard_fetch: {
-      model: 'gemini-3.8-flash',
+      model: DEFAULT_MODELS.toolDashboard,
       customModel: '',
       usePrimaryApiKey: true,
       customApiKey: '',
       enableFallback: true,
-      fallbackModel: 'gemini-3.5-flash-lite',
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       isRetired: false,
     },
     subagent_runner: {
-      model: 'gemini-3.8-flash',
+      model: DEFAULT_MODELS.toolSubagent,
       customModel: '',
       usePrimaryApiKey: true,
       customApiKey: '',
       enableFallback: true,
-      fallbackModel: 'gemini-3.5-flash-lite',
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       isRetired: false,
     },
     voice_live: {
-      model: 'gemini-3.8-flash-exp',
+      model: DEFAULT_MODELS.toolVoiceLive,
       customModel: '',
       usePrimaryApiKey: true,
       customApiKey: '',
       enableFallback: false,
-      fallbackModel: 'gemini-3.8-flash',
+      fallbackModel: DEFAULT_MODELS.primary,
       isRetired: false,
     },
     image_generation: {
@@ -91,13 +92,7 @@ export const DEFAULT_CONFIG: ToolsConfig = {
   },
 };
 
-export const BUILTIN_GEMINI_MODELS = [
-  'gemini-3.8-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-3.8-flash-exp',
-];
+export const BUILTIN_GEMINI_MODELS = [...TOOL_CONFIG_AVAILABLE_MODELS];
 
 export const BUILTIN_OPENROUTER_MODELS = [
   'google/gemini-3.8-flash',

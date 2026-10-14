@@ -3,6 +3,7 @@
 // thinking block parsing, tool invocation dispatch, and fallback to OpenRouter/mock responses.
 
 import { GoogleGenAI } from '@google/genai';
+import { DEFAULT_MODELS, FALLBACK_RETRY_MODELS, resolveActiveModel } from '../../../shared/config/models';
 import type { ToolExecutionSummary, ChatMessage } from '../../../shared/types';
 import { ToolRegistry } from '../tools/tool-registry';
 
@@ -205,7 +206,7 @@ export class GeminiService {
 
   constructor(config: GeminiServiceConfig = {}, toolRegistry?: ToolRegistry) {
     this.config = {
-      primaryModel: 'gemini-3.8-flash',
+      primaryModel: DEFAULT_MODELS.primary,
       temperature: 0.7,
       topP: 0.95,
       maxOutputTokens: 4096,
@@ -237,7 +238,7 @@ export class GeminiService {
   }
 
   public getPrimaryModel(): string {
-    return this.config.primaryModel || 'gemini-3.8-flash';
+    return this.config.primaryModel || DEFAULT_MODELS.primary;
   }
 
   public cancelStream(): void {
@@ -269,7 +270,7 @@ export class GeminiService {
 
     const effectiveApiKey = this.config.geminiApiKey?.trim();
     const effectiveOpenRouterKey = this.config.openRouterApiKey?.trim();
-    const modelName = options.model || this.config.primaryModel || 'gemini-3.8-flash';
+    const modelName = resolveActiveModel(options.model || this.config.primaryModel, DEFAULT_MODELS.primary);
 
     // 1. Try Gemini API
     if (effectiveApiKey) {
@@ -355,17 +356,7 @@ export class GeminiService {
     signal: AbortSignal
   ): Promise<GenerateResult> {
     const apiKey = this.config.geminiApiKey!;
-    let modelName = options.model || this.config.primaryModel || 'gemini-3.5-flash-lite';
-    if (
-      !modelName ||
-      modelName === 'gemini-2.0-flash' ||
-      modelName === 'gemini-2.5-flash' ||
-      modelName === 'gemini-2.5-flash-lite' ||
-      modelName === 'gemini-1.5-flash' ||
-      modelName === 'gemini-1.5-pro'
-    ) {
-      modelName = 'gemini-3.5-flash-lite';
-    }
+    let modelName = resolveActiveModel(options.model || this.config.primaryModel, DEFAULT_MODELS.primary);
     const ai = new GoogleGenAI({ apiKey });
 
     // Prepare contents
@@ -472,11 +463,7 @@ export class GeminiService {
 
       const candidateModels = [
         modelName,
-        'gemini-3.5-flash-lite',
-        'gemini-3.1-flash-lite',
-        'gemini-3-flash-preview',
-        'gemini-3.5-flash',
-        'gemini-3.8-flash',
+        ...FALLBACK_RETRY_MODELS,
       ].filter((v, i, a) => Boolean(v) && a.indexOf(v) === i);
       let streamResponse: any = null;
       let primaryStreamErr: any = null;

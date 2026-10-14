@@ -48,10 +48,11 @@ import type {
   ChatMessage,
   AppSettings,
 } from '../shared/types';
+import { DEFAULT_MODELS, resolveActiveModel } from '../shared/config/models';
 
 // Default Storage Fixtures
 const DEFAULT_SETTINGS: AppSettings = {
-  primaryModel: 'gemini-3.5-flash-lite',
+  primaryModel: DEFAULT_MODELS.primary,
   geminiApiKey: process.env.GEMINI_API_KEY || '',
   openRouterApiKey: '',
   huggingFaceApiKey: '',
@@ -212,13 +213,7 @@ if (!gotTheLock) {
     // Update settingsStore with loaded keys and modern model
     settingsStore.update((current) => ({
       ...current,
-      primaryModel:
-        !current.primaryModel ||
-        current.primaryModel === 'gemini-2.0-flash' ||
-        current.primaryModel === 'gemini-2.5-flash' ||
-        current.primaryModel === 'gemini-2.5-flash-lite'
-          ? 'gemini-3.5-flash-lite'
-          : current.primaryModel,
+      primaryModel: resolveActiveModel(current.primaryModel, DEFAULT_MODELS.primary),
       geminiApiKey: initialGeminiKey || current.geminiApiKey,
       openRouterApiKey: initialOpenRouterKey || current.openRouterApiKey,
       huggingFaceApiKey: initialHfKey || current.huggingFaceApiKey,

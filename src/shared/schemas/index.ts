@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_MODELS } from '../config/models';
 
 export const TaskSchema = z.object({
   id: z.string(),
@@ -22,7 +23,7 @@ export const NoteSchema = z.object({
 });
 
 export const AppSettingsSchema = z.object({
-  primaryModel: z.string().default('gemini-3.8-flash'),
+  primaryModel: z.string().default(DEFAULT_MODELS.primary),
   geminiApiKey: z.string().default(''),
   openRouterApiKey: z.string().default(''),
   huggingFaceApiKey: z.string().default(''),

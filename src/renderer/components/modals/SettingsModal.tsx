@@ -24,6 +24,13 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/state/useAppStore';
 import { useAudio } from '@/shared/hooks/useAudio';
+import {
+  DEFAULT_MODELS,
+  AVAILABLE_MODELS,
+  OPENROUTER_MODEL_SUGGESTIONS,
+  GEMINI_MODEL_SUGGESTIONS,
+  TOOL_CONFIG_AVAILABLE_MODELS,
+} from '../../../shared/config/models';
 
 interface UserProfileData {
   name?: string;
@@ -221,20 +228,9 @@ interface KkProps {
   electronAPI: any;
 }
 
-const MkSuggestions = [
-  'google/gemini-3.1-flash-lite',
-  'google/gemini-3.5-flash',
-  'anthropic/claude-sonnet-4.6',
-  'openai/gpt-5.5',
-  'moonshotai/kimi-k2.5',
-];
+const MkSuggestions = OPENROUTER_MODEL_SUGGESTIONS;
 
-const JkSuggestions = [
-  'gemini-3.1-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-3.1-pro-preview',
-];
+const JkSuggestions = GEMINI_MODEL_SUGGESTIONS;
 
 const ModelConfigTab: React.FC<KkProps> = ({
   provider,
@@ -259,7 +255,7 @@ const ModelConfigTab: React.FC<KkProps> = ({
 
   const suggestionPills = isOpenRouter ? MkSuggestions : JkSuggestions;
   const keyPlaceholder = isOpenRouter ? 'sk-or-v1-...' : 'Your Gemini API key';
-  const modelPlaceholder = isOpenRouter ? 'google/gemini-3.5-flash' : 'gemini-3.5-flash';
+  const modelPlaceholder = isOpenRouter ? DEFAULT_MODELS.openRouterPrimary : DEFAULT_MODELS.primary;
   const keyLink = isOpenRouter ? 'https://openrouter.ai/keys' : 'https://aistudio.google.com/app/apikey';
 
   const checkCodexAuth = useCallback(async () => {
@@ -349,7 +345,7 @@ const ModelConfigTab: React.FC<KkProps> = ({
             onClick={() => {
               playClick();
               setProvider('openrouter');
-              setModelId('google/gemini-3.1-flash-lite');
+              setModelId(DEFAULT_MODELS.openRouterSubAgent);
             }}
             className={`relative p-3 rounded-xl border text-left transition-all duration-300 ${
               isOpenRouter
@@ -383,7 +379,7 @@ const ModelConfigTab: React.FC<KkProps> = ({
             onClick={() => {
               playClick();
               setProvider('gemini');
-              setModelId('gemini-3.1-flash-lite');
+              setModelId(DEFAULT_MODELS.agentTown);
             }}
             className={`relative p-3 rounded-xl border text-left transition-all duration-300 ${
               isGemini
@@ -691,32 +687,32 @@ const ToolsTab: React.FC<{ electronAPI?: any; playClick: () => void }> = ({
   const [showHfToken, setShowHfToken] = useState(false);
 
   const [enableGlobalFallback, setEnableGlobalFallback] = useState(true);
-  const [defaultGlobalFallbackModel, setDefaultGlobalFallbackModel] = useState('gemini-3.5-flash-lite');
+  const [defaultGlobalFallbackModel, setDefaultGlobalFallbackModel] = useState<string>(DEFAULT_MODELS.toolGlobal);
 
   const [tools, setTools] = useState<any>({
     web_search: {
-      model: 'gemini-3.5-flash-lite',
-      fallbackModel: 'gemini-3.5-flash-lite',
+      model: DEFAULT_MODELS.toolWebSearch,
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       enableFallback: true,
     },
     whatsapp_transcribe: {
-      model: 'gemini-3.8-flash',
-      fallbackModel: 'gemini-3.5-flash-lite',
+      model: DEFAULT_MODELS.toolWhatsapp,
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       enableFallback: true,
     },
     dashboard_fetch: {
-      model: 'gemini-3.8-flash',
-      fallbackModel: 'gemini-3.5-flash-lite',
+      model: DEFAULT_MODELS.toolDashboard,
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       enableFallback: true,
     },
     subagent_runner: {
-      model: 'gemini-3.8-flash',
-      fallbackModel: 'gemini-3.5-flash-lite',
+      model: DEFAULT_MODELS.toolSubagent,
+      fallbackModel: DEFAULT_MODELS.toolGlobal,
       enableFallback: true,
     },
     voice_live: {
-      model: 'gemini-3.8-flash-exp',
-      fallbackModel: 'gemini-3.8-flash',
+      model: DEFAULT_MODELS.toolVoiceLive,
+      fallbackModel: DEFAULT_MODELS.primary,
       enableFallback: false,
     },
     image_generation: {
@@ -786,14 +782,7 @@ const ToolsTab: React.FC<{ electronAPI?: any; playClick: () => void }> = ({
     }));
   };
 
-  const modelOptions = [
-    'gemini-3.8-flash',
-    'gemini-3.5-flash-lite',
-    'gemini-2.5-flash',
-    'gemini-1.5-flash',
-    'gemini-1.5-pro',
-    'gemini-3.8-flash-exp',
-  ];
+  const modelOptions = TOOL_CONFIG_AVAILABLE_MODELS;
 
   const toolDisplayList = [
     {
@@ -912,8 +901,8 @@ const ToolsTab: React.FC<{ electronAPI?: any; playClick: () => void }> = ({
 
         {toolDisplayList.map((item) => {
           const cfg = tools[item.key] || {
-            model: 'gemini-3.5-flash-lite',
-            fallbackModel: 'gemini-3.5-flash-lite',
+            model: DEFAULT_MODELS.toolGlobal,
+            fallbackModel: DEFAULT_MODELS.toolGlobal,
             enableFallback: true,
           };
           return (
@@ -931,7 +920,7 @@ const ToolsTab: React.FC<{ electronAPI?: any; playClick: () => void }> = ({
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] text-white/40">Model:</span>
                   <select
-                    value={cfg.model || 'gemini-3.5-flash-lite'}
+                    value={cfg.model || DEFAULT_MODELS.toolGlobal}
                     onChange={(e) => updateTool(item.key, 'model', e.target.value)}
                     className="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-[#00e5ff] font-mono focus:outline-none focus:border-[#00e5ff]/50"
                   >
@@ -947,7 +936,7 @@ const ToolsTab: React.FC<{ electronAPI?: any; playClick: () => void }> = ({
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] text-white/40">Fallback:</span>
                   <select
-                    value={cfg.fallbackModel || 'gemini-3.5-flash-lite'}
+                    value={cfg.fallbackModel || DEFAULT_MODELS.toolGlobal}
                     onChange={(e) => updateTool(item.key, 'fallbackModel', e.target.value)}
                     className="bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-amber-400 font-mono focus:outline-none focus:border-amber-400/50"
                   >
@@ -1064,13 +1053,13 @@ export const SettingsModal: React.FC = () => {
   const [subAgentOverride, setSubAgentOverride] = useState(false);
   const [subAgentOpenRouterKey, setSubAgentOpenRouterKey] = useState('');
   const [showSubAgentKey, setShowSubAgentKey] = useState(false);
-  const [subAgentModelId, setSubAgentModelId] = useState('google/gemini-3.1-flash-lite');
+  const [subAgentModelId, setSubAgentModelId] = useState<string>(DEFAULT_MODELS.openRouterSubAgent);
 
   // Agent Town states
   const [agentTownProvider, setAgentTownProvider] = useState<'gemini' | 'openrouter' | 'openai-codex'>('gemini');
   const [agentTownGeminiKey, setAgentTownGeminiKey] = useState('');
   const [agentTownOpenRouterKey, setAgentTownOpenRouterKey] = useState('');
-  const [agentTownModelId, setAgentTownModelId] = useState('gemini-3.1-flash-lite');
+  const [agentTownModelId, setAgentTownModelId] = useState<string>(DEFAULT_MODELS.agentTown);
 
   // System states
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(true);
@@ -1613,7 +1602,7 @@ export const SettingsModal: React.FC = () => {
                           type="text"
                           value={subAgentModelId}
                           readOnly
-                          placeholder="google/gemini-3.1-flash-lite"
+                          placeholder={DEFAULT_MODELS.openRouterSubAgent}
                           className="w-full bg-black/20 border border-white/5 rounded-xl px-3.5 py-2 text-white/50 text-xs font-mono cursor-not-allowed focus:outline-none transition-all placeholder:text-white/25"
                         />
                       </div>
@@ -1636,7 +1625,7 @@ export const SettingsModal: React.FC = () => {
                       <p className="text-[10px] font-medium text-white/60 truncate leading-none">
                         {subAgentOverride && subAgentModelId.trim()
                           ? `Active Override: ${subAgentModelId.trim()}`
-                          : `Default Engine: gemini-3.8-flash`}
+                          : `Default Engine: ${DEFAULT_MODELS.primary}`}
                       </p>
                     </div>
                   </div>
@@ -1652,7 +1641,7 @@ export const SettingsModal: React.FC = () => {
                       <span className="text-[9px] font-semibold text-white/30 uppercase tracking-tight">
                         Main Assistant
                       </span>
-                      <p className="text-xs font-medium text-white mt-0.5">gemini-3.1-flash-lite</p>
+                      <p className="text-xs font-medium text-white mt-0.5">{DEFAULT_MODELS.agentTown}</p>
                       <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[8px] font-bold mt-1.5 tracking-wide uppercase">
                         Live Link
                       </span>
@@ -1668,7 +1657,7 @@ export const SettingsModal: React.FC = () => {
                         Child Worker
                       </span>
                       <p className="text-xs font-medium text-white mt-0.5">
-                        {subAgentOverride ? subAgentModelId : 'gemini-3.8-flash'}
+                        {subAgentOverride ? subAgentModelId : DEFAULT_MODELS.agent}
                       </p>
                       <span className="inline-block px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 text-[8px] font-bold mt-1.5 tracking-wide uppercase">
                         Background

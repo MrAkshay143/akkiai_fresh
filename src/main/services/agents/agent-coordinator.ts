@@ -11,6 +11,7 @@ import type {
   AgentTask,
   AgentTaskStatus,
 } from '../../../shared/types';
+import { DEFAULT_MODELS } from '../../../shared/config/models';
 
 export interface AgentCoordinatorEvents {
   'task:queued': (task: AgentTask) => void;
@@ -34,7 +35,7 @@ export class AgentCoordinator extends EventEmitter {
   private activeExecutions: Map<string, NodeJS.Timeout[]> = new Map();
   private customExecutors: Map<SubAgentName, CustomTaskExecutor> = new Map();
   private geminiService?: any;
-  private activeModelId: string = 'gemini-3.1-flash-lite';
+  private activeModelId: string = DEFAULT_MODELS.agent;
 
   public setGeminiService(service: any): void {
     this.geminiService = service;
@@ -299,7 +300,7 @@ export class AgentCoordinator extends EventEmitter {
             const synthesis = await this.geminiService.generateStream({
               prompt: `[Rancho Deep Research & Intelligence Task]\nTask: ${task.taskTitle}\nDetails: ${task.description || 'Perform comprehensive research and synthesize findings.'}`,
               messages: [],
-              model: this.activeModelId || 'gemini-3.1-flash-lite',
+              model: this.activeModelId || DEFAULT_MODELS.agent,
               systemInstruction:
                 'You are Rancho, a deep research and web intelligence sub-agent. You have direct autonomous access to tools: web_search and deep_search to find live data, verify facts, analyze articles via Jina, and track real-time market indicators. Proactively call your tools to gather verified information, then compile an analytical research synthesis with key takeaways.',
               toolRegistry: this.toolRegistry,
@@ -349,7 +350,7 @@ export class AgentCoordinator extends EventEmitter {
             const result = await this.geminiService.generateStream({
               prompt: `[Leo Code & Technical Analysis]\nTask: ${task.taskTitle}\nDetails: ${task.description || 'Perform technical analysis and execute needed file/code operations.'}`,
               messages: [],
-              model: this.activeModelId || 'gemini-3.1-flash-lite',
+              model: this.activeModelId || DEFAULT_MODELS.agent,
               systemInstruction:
                 'You are Leo, a specialized coding, software architecture, and technical analysis sub-agent. You have direct autonomous access to tools: fs_read, fs_write, fs_list, and os_exec to inspect, modify, and execute local files and commands. Use these tools proactively to complete the user task, and provide clean technical markdown summaries.',
               toolRegistry: this.toolRegistry,
@@ -380,7 +381,7 @@ export class AgentCoordinator extends EventEmitter {
             const result = await this.geminiService.generateStream({
               prompt: `[Chatur Data Formatting & Math Task]\nTask: ${task.taskTitle}\nDetails: ${task.description || 'Format data, verify mathematical logic, or generate visual diagrams.'}`,
               messages: [],
-              model: this.activeModelId || 'gemini-3.1-flash-lite',
+              model: this.activeModelId || DEFAULT_MODELS.agent,
               systemInstruction:
                 'You are Chatur, a data formatting, mathematical proofs, and diagram visualization specialist sub-agent. You have direct autonomous access to the generate_diagram tool to render Mermaid charts and architecture graphs for the Visual Hub. Structure all outputs with impeccable tables, schemas, LaTeX formulas, or diagrams.',
               toolRegistry: this.toolRegistry,
@@ -425,7 +426,7 @@ export class AgentCoordinator extends EventEmitter {
             const hwRes = await this.geminiService.generateStream({
               prompt: `[Raju Hardware & Automation Task]\nTask: ${task.taskTitle}\nDetails: ${task.description || 'Hardware operation and system automation.'}`,
               messages: [],
-              model: this.activeModelId || 'gemini-3.1-flash-lite',
+              model: this.activeModelId || DEFAULT_MODELS.agent,
               systemInstruction:
                 'You are Raju, a specialist hardware automation and serial microcontroller sub-agent. You have direct autonomous access to tools: arduino_list_ports, arduino_connect, arduino_digital_write, arduino_analog_read, arduino_servo_write, and os_exec. Call your tools to interface with hardware boards, inspect connected COM ports, and trigger automation routines.',
               toolRegistry: this.toolRegistry,

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import type { ChatMessage, AppSettings } from '../../../shared/types';
+import { DEFAULT_MODELS, resolveActiveModel } from '../../../shared/config/models';
 import { GeminiService, GenerateResult } from './gemini-service';
 import { PersonaService } from './persona-service';
 import { MemoryService } from '../memory/memory-service';
@@ -27,7 +28,7 @@ export class AIService {
 
     this.geminiService = new GeminiService({
       geminiApiKey: initialApiKey || process.env.GEMINI_API_KEY || '',
-      primaryModel: 'gemini-3.8-flash',
+      primaryModel: DEFAULT_MODELS.primary,
     });
 
     if (toolRegistry) {
@@ -80,17 +81,7 @@ export class AIService {
     const settings = this.currentSettings ? this.currentSettings() : undefined;
     const apiKey = (payload.options?.geminiApiKey as string) || settings?.geminiApiKey;
     const openRouterKey = (payload.options?.openRouterApiKey as string) || settings?.openRouterApiKey;
-    let model = payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel || 'gemini-3.5-flash-lite';
-    if (
-      !model ||
-      model === 'gemini-2.0-flash' ||
-      model === 'gemini-2.5-flash' ||
-      model === 'gemini-2.5-flash-lite' ||
-      model === 'gemini-1.5-flash' ||
-      model === 'gemini-1.5-pro'
-    ) {
-      model = 'gemini-3.5-flash-lite';
-    }
+    let model = resolveActiveModel(payload.model || (payload.options?.primaryModel as string) || settings?.primaryModel, DEFAULT_MODELS.primary);
     const persona = settings?.selectedPersona || 'caring_companion';
 
     if (apiKey) this.geminiService.setApiKey(apiKey);
