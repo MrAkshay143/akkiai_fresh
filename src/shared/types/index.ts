@@ -28,13 +28,21 @@ export interface NoteItem {
   favorite?: boolean;
 }
 
+export interface ToolTrace {
+  name: string;
+  success: boolean;
+  durationMs: number;
+  outcome: string;
+}
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant' | 'system';
   avatarType?: 'user' | 'akki' | 'robot';
   content: string;
   thinking?: string;
-  toolCalls?: ToolExecutionSummary[];
+  toolCalls?: any[];
+  toolTraces?: ToolTrace[];
   timestamp: string;
   audioUrl?: string;
   attachments?: { name: string; size: number }[];

@@ -6,7 +6,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
 import { useAppStore } from '@/state/useAppStore';
 import { useAudio } from '@/shared/hooks/useAudio';
-import type { ChatMessage } from '../../../shared/types';
+import type { ChatMessage, ToolTrace } from '../../../shared/types';
 
 // ── Audio Helpers from Legacy index-pSpzB4bE.js ──────────────────────────────
 
@@ -416,38 +416,126 @@ export function useGeminiLive() {
               liveAssistantTextRef.current = '';
             }
 
-            // Tool Calling dispatch
+            // Tool Calling dispatch with complete trace collection & ChatDrawer rendering
             if (msg.toolCall?.functionCalls) {
-              const calls = msg.toolCall.functionCalls;
-              const functionResponses: any[] = [];
-              for (const call of calls) {
-                try {
-                  let result: any = { success: true };
-                  if ((window as any).electronAPI?.invoke) {
-                    result = await (window as any).electronAPI.invoke('tools:execute', {
-                      toolName: call.name,
-                      args: call.args || {},
+              const calls = Array.isArray(msg.toolCall.functionCalls)
+                ? msg.toolCall.functionCalls
+                : [];
+              if (calls.length > 0) {
+                if (!liveAssistantMsgIdRef.current) {
+                  liveAssistantMsgIdRef.current = `msg_${Date.now()}`;
+                }
+                const currentMsgId = liveAssistantMsgIdRef.current;
+
+                // Ensure assistant message card exists with toolCalls attached
+                setMessages((prev) => {
+                  const existing = prev.find((m) => m.id === currentMsgId);
+                  if (existing) {
+                    return prev.map((m) =>
+                      m.id === currentMsgId
+                        ? {
+                            ...m,
+                            toolCalls: [...(m.toolCalls || []), ...calls],
+                            toolTraces: m.toolTraces || [],
+                          }
+                        : m
+                    );
+                  } else {
+                    return [
+                      ...prev,
+                      {
+                        id: currentMsgId,
+                        sender: 'assistant',
+                        avatarType: 'akki',
+                        content: liveAssistantTextRef.current || '',
+                        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                        toolCalls: calls,
+                        toolTraces: [],
+                      },
+                    ];
+                  }
+                });
+
+                const functionResponses: any[] = [];
+                const newTraces: ToolTrace[] = [];
+
+                for (const call of calls) {
+                  const tStart = performance.now();
+                  try {
+                    let result: any = { success: true };
+                    if ((window as any).electronAPI?.invoke) {
+                      result = await (window as any).electronAPI.invoke('tools:execute', {
+                        toolName: call.name,
+                        args: call.args || {},
+                      });
+                    }
+                    const durationMs = Math.round(performance.now() - tStart);
+                    const isSuccess = result?.success !== false && !result?.error;
+
+                    let outcome = '';
+                    if (typeof result === 'string') {
+                      outcome = result;
+                    } else if (result?.output !== undefined) {
+                      outcome = typeof result.output === 'object'
+                        ? JSON.stringify(result.output, null, 2)
+                        : String(result.output);
+                    } else if (result?.result !== undefined) {
+                      outcome = typeof result.result === 'object'
+                        ? JSON.stringify(result.result, null, 2)
+                        : String(result.result);
+                    } else {
+                      outcome = JSON.stringify(result, null, 2);
+                    }
+
+                    newTraces.push({
+                      name: call.name,
+                      success: isSuccess,
+                      durationMs,
+                      outcome,
+                    });
+
+                    functionResponses.push({
+                      name: call.name,
+                      id: call.id,
+                      response: { result },
+                    });
+                  } catch (toolErr: any) {
+                    const durationMs = Math.round(performance.now() - tStart);
+                    newTraces.push({
+                      name: call.name,
+                      success: false,
+                      durationMs,
+                      outcome: toolErr.message || 'Tool execution error',
+                    });
+                    functionResponses.push({
+                      name: call.name,
+                      id: call.id,
+                      response: { error: toolErr.message },
                     });
                   }
-                  functionResponses.push({
-                    name: call.name,
-                    id: call.id,
-                    response: { result },
-                  });
-                } catch (toolErr: any) {
-                  functionResponses.push({
-                    name: call.name,
-                    id: call.id,
-                    response: { error: toolErr.message },
-                  });
                 }
-              }
 
-              if (functionResponses.length > 0) {
-                try {
-                  session.sendToolResponse({ functionResponses });
-                } catch (sendErr) {
-                  console.warn('[GeminiLive] Tool response send error:', sendErr);
+                // Update messages state with completed traces so ToolTraceCard renders immediately
+                if (newTraces.length > 0) {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === currentMsgId
+                        ? {
+                            ...m,
+                            toolCalls: calls,
+                            toolTraces: [...(m.toolTraces || []), ...newTraces],
+                          }
+                        : m
+                    )
+                  );
+                }
+
+                if (functionResponses.length > 0) {
+                  try {
+                    session.sendToolResponse({ functionResponses });
+                  } catch (sendErr) {
+                    console.warn('[GeminiLive] Tool response send error:', sendErr);
+                  }
                 }
               }
             }

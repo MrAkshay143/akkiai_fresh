@@ -18,7 +18,8 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/state/useAppStore';
 import { useAudio } from '@/shared/hooks/useAudio';
-import { ChatMessage, ToolExecutionSummary } from '@shared/types';
+import { ChatMessage, ToolExecutionSummary, ToolTrace } from '@shared/types';
+import { ToolTraceCard } from './components/ToolTraceCard';
 
 interface AttachedFile {
   name: string;
@@ -1117,12 +1118,28 @@ export const ChatDrawer: React.FC = () => {
             ? result.toolCalls
             : undefined;
 
+        const toolTraces: ToolTrace[] | undefined =
+          toolCalls && toolCalls.length > 0
+            ? toolCalls.map((tc: any) => ({
+                name: tc.toolName || tc.name || 'tool',
+                success: tc.status === 'success' || (!tc.error && tc.status !== 'error'),
+                durationMs: Math.round((tc.executionTimeSec || 0.5) * 1000),
+                outcome:
+                  tc.output !== undefined
+                    ? typeof tc.output === 'object'
+                      ? JSON.stringify(tc.output, null, 2)
+                      : String(tc.output)
+                    : tc.error || 'Execution completed',
+              }))
+            : undefined;
+
         const assistantMsg: ChatMessage = {
           id: `msg-${Date.now() + 1}`,
           sender: 'assistant',
           avatarType: 'akki',
           thinking: thinkingEnabled ? thinking : undefined,
           toolCalls,
+          toolTraces,
           content,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         };
@@ -1480,70 +1497,53 @@ export const ChatDrawer: React.FC = () => {
                         </div>
                       )}
 
-                      {/* Tool Invocation Badges */}
-                      {msg.toolCalls && msg.toolCalls.length > 0 && (
-                        <div className="flex flex-col space-y-1.5">
-                          {msg.toolCalls.map((tool) => (
-                            <div
-                              key={tool.id}
-                              className="bg-[#09141d] border border-[rgba(0,229,255,0.18)] rounded-lg text-xs overflow-hidden"
-                            >
-                              <div
-                                onClick={() => toggleToolCollapse(tool.id)}
-                                className="flex items-center justify-between px-2.5 py-1.5 cursor-pointer hover:bg-[#0e1f30] transition-colors"
-                              >
-                                <div className="flex items-center space-x-2">
-                                  <Zap size={11} className="text-[#00e5ff]" />
-                                  <span className="text-[10px] font-mono text-gray-300">
-                                    Module:{' '}
-                                    <strong className="text-white font-semibold">
-                                      {tool.toolName}
-                                    </strong>
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-[9px] font-mono text-gray-400 flex items-center space-x-0.5">
-                                    <Clock size={9} />
-                                    <span>{tool.executionTimeSec}s</span>
-                                  </span>
-
-                                  {tool.status === 'running' && (
-                                    <Loader2 size={12} className="text-[#00f0ff] animate-spin" />
-                                  )}
-                                  {tool.status === 'success' && (
-                                    <CheckCircle2 size={12} className="text-emerald-400" />
-                                  )}
-                                  {tool.status === 'error' && (
-                                    <AlertTriangle size={12} className="text-red-400" />
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Tool output drawer */}
-                              {expandedTools[tool.id] && Boolean(tool.output) && (
-                                <div className="p-2 bg-[#090616] border-t border-[#23173d] text-[10px] font-mono text-gray-400 overflow-x-auto">
-                                  <pre>{JSON.stringify(tool.output, null, 2)}</pre>
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                      {/* Tool Invocation Traces (Exact Old App Parity sK) */}
+                      {((msg.toolTraces && msg.toolTraces.length > 0) || (msg.toolCalls && msg.toolCalls.length > 0)) && (
+                        <div className="flex flex-col gap-1 w-full mt-1 mb-1 relative z-10 pl-1 max-w-full self-start">
+                          {(msg.toolTraces && msg.toolTraces.length > 0
+                            ? msg.toolTraces
+                            : (msg.toolCalls || []).map((tc: any) => ({
+                                name: tc.toolName || tc.name || 'tool',
+                                success: tc.status === 'success' || (!tc.error && tc.status !== 'error'),
+                                durationMs: Math.round((tc.executionTimeSec || 0.5) * 1000),
+                                outcome:
+                                  tc.output !== undefined
+                                    ? typeof tc.output === 'object'
+                                      ? JSON.stringify(tc.output, null, 2)
+                                      : String(tc.output)
+                                    : tc.error || 'Executed successfully',
+                              }))
+                          ).map((trace, idx) => {
+                            const toolCall = msg.toolCalls?.find(
+                              (call: any) =>
+                                (call.function?.name || call.name || call.toolName) === trace.name
+                            );
+                            return (
+                              <ToolTraceCard
+                                key={`${msg.id}-trace-${idx}-${trace.name}`}
+                                trace={trace}
+                                toolCall={toolCall}
+                              />
+                            );
+                          })}
                         </div>
                       )}
 
                       {/* Companion Speech Bubble */}
-                      <div className="flex items-start space-x-2.5 pt-1">
-                        <div className="w-7 h-7 rounded-full overflow-hidden border border-[#c084fc] flex-shrink-0 mt-0.5">
-                          <img
-                            src="./branding/companion_avatar.png"
-                            alt="Akki"
-                            className="w-full h-full object-cover"
-                          />
+                      {msg.content ? (
+                        <div className="flex items-start space-x-2.5 pt-1">
+                          <div className="w-7 h-7 rounded-full overflow-hidden border border-[#c084fc] flex-shrink-0 mt-0.5">
+                            <img
+                              src="./branding/companion_avatar.png"
+                              alt="Akki"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="flex-1 bg-[#1a1138] border border-[#3b2568] text-gray-200 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-none shadow-[0_0_10px_rgba(59,37,104,0.3)] leading-relaxed">
+                            {msg.content}
+                          </div>
                         </div>
-                        <div className="flex-1 bg-[#1a1138] border border-[#3b2568] text-gray-200 text-xs px-3.5 py-2.5 rounded-2xl rounded-tl-none shadow-[0_0_10px_rgba(59,37,104,0.3)] leading-relaxed">
-                          {msg.content}
-                        </div>
-                      </div>
+                      ) : null}
                     </div>
                   )}
                 </div>
