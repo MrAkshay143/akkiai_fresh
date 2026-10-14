@@ -7,7 +7,43 @@ import { GoogleGenAI } from '@google/genai';
 import { useAppStore } from '@/state/useAppStore';
 import { useAudio } from '@/shared/hooks/useAudio';
 import { DEFAULT_MODELS } from '../../../shared/config/models';
+import { TOOL_TRIGGER_RULES } from '../../../shared/config/prompts';
 import type { ChatMessage, ToolTrace } from '../../../shared/types';
+
+/**
+ * Inserts or updates user message so it always precedes the assistant response chronologically.
+ */
+function insertUserMessageChronologically(
+  prev: ChatMessage[],
+  userMsg: ChatMessage,
+  currentAssistantId?: string | null
+): ChatMessage[] {
+  const existingIdx = prev.findIndex((m) => m.id === userMsg.id);
+  if (existingIdx !== -1) {
+    const updated = [...prev];
+    updated[existingIdx] = {
+      ...updated[existingIdx],
+      content: userMsg.content,
+    };
+    return updated;
+  }
+  // Check if current turn assistant message is already in prev
+  if (currentAssistantId) {
+    const aIdx = prev.findIndex((m) => m.id === currentAssistantId);
+    if (aIdx !== -1) {
+      const updated = [...prev];
+      updated.splice(aIdx, 0, userMsg);
+      return updated;
+    }
+  }
+  // If last message in prev is assistant, insert before it
+  if (prev.length > 0 && prev[prev.length - 1].sender === 'assistant') {
+    const updated = [...prev];
+    updated.splice(updated.length - 1, 0, userMsg);
+    return updated;
+  }
+  return [...prev, userMsg];
+}
 
 // ── Audio Helpers from Legacy index-pSpzB4bE.js ──────────────────────────────
 
@@ -90,6 +126,7 @@ export function useGeminiLive() {
   const isConnectingRef = useRef<boolean>(false);
   const liveAssistantMsgIdRef = useRef<string | null>(null);
   const liveAssistantTextRef = useRef<string>('');
+  const liveUserMsgIdRef = useRef<string | null>(null);
   const liveUserTextRef = useRef<string>('');
 
   // Clean up all audio resources
@@ -141,6 +178,7 @@ export function useGeminiLive() {
 
     liveAssistantMsgIdRef.current = null;
     liveAssistantTextRef.current = '';
+    liveUserMsgIdRef.current = null;
     liveUserTextRef.current = '';
     setIsStreaming(false);
   }, [setIsStreaming]);
@@ -197,13 +235,36 @@ export function useGeminiLive() {
         settings.selectedVoice ||
         'Charon';
 
-      // Cultural System Instruction
+      // Cultural System Instruction with Tool Trigger Rules
       const userName = (settings.userName || 'Akshay').trim();
       const soulPrompt =
         settings.customSystemPrompt ||
         'You are Akki AI, a warm, highly intelligent, and loyal personal desktop AI companion pairing with Akshay. Respond warmly, concisely, and naturally in Hinglish/Hindi or English as preferred by the user.';
 
-      const systemInstruction = `${soulPrompt}\nUser Profile: Name: ${userName}. You speak naturally in live conversational voice. Keep responses concise and engaging.`;
+      const fullSystemInstruction = `${soulPrompt}
+User Profile: Name: ${userName}. You speak naturally in live conversational voice. Keep responses concise, warm, and engaging.
+
+${TOOL_TRIGGER_RULES}`;
+
+      // Load tool declarations so Gemini Live can execute tools
+      let toolsConfig: any[] = [];
+      try {
+        const tools = await (window as any).electronAPI?.listTools?.();
+        if (Array.isArray(tools) && tools.length > 0) {
+          const functionDeclarations = tools
+            .filter((t: any) => !t.name.startsWith('browser_'))
+            .map((t: any) => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.parameters || { type: 'object', properties: {} },
+            }));
+          if (functionDeclarations.length > 0) {
+            toolsConfig = [{ functionDeclarations }];
+          }
+        }
+      } catch (e) {
+        console.warn('[GeminiLive] Failed to load tool declarations:', e);
+      }
 
       // 5. Connect via GoogleGenAI Live Client
       const ai = new GoogleGenAI({ apiKey });
@@ -218,6 +279,7 @@ export function useGeminiLive() {
               },
             },
           },
+          tools: toolsConfig.length > 0 ? toolsConfig : undefined,
           inputAudioTranscription: {},
           outputAudioTranscription: {},
           realtimeInputConfig: {
@@ -228,7 +290,7 @@ export function useGeminiLive() {
             },
           },
           systemInstruction: {
-            parts: [{ text: systemInstruction }],
+            parts: [{ text: fullSystemInstruction }],
           },
         } as any,
         callbacks: {
@@ -238,6 +300,7 @@ export function useGeminiLive() {
               isConnectingRef.current = false;
               setAssistantStatus('listening');
               playInit();
+
 
               // Cultural Greeting on Cold Start (authentic legacy protocol)
               if (window.__akkiColdStart && !sessionStorage.getItem('__akkiGreetingSpoken')) {
@@ -337,9 +400,9 @@ export function useGeminiLive() {
               // 1. Floating companion speech bubble over orb
               setCompanionSpeech(fullAssistantText);
 
-              // 2. ChatDrawer message stream
+              // 2. ChatDrawer message stream (guarantee user message is chronologically before assistant)
               setMessages((prev) => {
-                const targetId = liveAssistantMsgIdRef.current;
+                const targetId = liveAssistantMsgIdRef.current!;
                 const existingIdx = prev.findIndex((m) => m.id === targetId);
                 if (existingIdx !== -1) {
                   const updated = [...prev];
@@ -349,25 +412,54 @@ export function useGeminiLive() {
                   };
                   return updated;
                 } else {
-                  return [
-                    ...prev,
-                    {
-                      id: targetId!,
-                      sender: 'assistant',
-                      avatarType: 'akki',
-                      content: fullAssistantText,
+                  const assistantMsg: ChatMessage = {
+                    id: targetId,
+                    sender: 'assistant',
+                    avatarType: 'akki',
+                    content: fullAssistantText,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  };
+
+                  // If user speech was transcribed but not yet in prev, add user first, then assistant!
+                  const userSpeech = liveUserTextRef.current.trim();
+                  if (userSpeech && (!liveUserMsgIdRef.current || !prev.some((m) => m.id === liveUserMsgIdRef.current))) {
+                    if (!liveUserMsgIdRef.current) {
+                      liveUserMsgIdRef.current = `live-u-${Date.now()}`;
+                    }
+                    const userMsg: ChatMessage = {
+                      id: liveUserMsgIdRef.current,
+                      sender: 'user',
+                      avatarType: 'user',
+                      content: userSpeech,
                       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    },
-                  ];
+                    };
+                    return [...prev, userMsg, assistantMsg];
+                  }
+
+                  return [...prev, assistantMsg];
                 }
               });
             }
 
-            // User audio transcription
+            // User audio transcription (real-time live streaming of user voice)
             if (msg.serverContent?.inputTranscription?.text) {
               const userTranscript = msg.serverContent.inputTranscription.text;
               if (userTranscript) {
                 liveUserTextRef.current += userTranscript;
+                const userSpeech = liveUserTextRef.current.trim();
+                if (userSpeech) {
+                  if (!liveUserMsgIdRef.current) {
+                    liveUserMsgIdRef.current = `live-u-${Date.now()}`;
+                  }
+                  const userMsg: ChatMessage = {
+                    id: liveUserMsgIdRef.current,
+                    sender: 'user',
+                    avatarType: 'user',
+                    content: userSpeech,
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                  };
+                  setMessages((prev) => insertUserMessageChronologically(prev, userMsg, liveAssistantMsgIdRef.current));
+                }
               }
             }
 
@@ -384,6 +476,7 @@ export function useGeminiLive() {
               setIsStreaming(false);
               liveAssistantMsgIdRef.current = null;
               liveAssistantTextRef.current = '';
+              liveUserMsgIdRef.current = null;
               liveUserTextRef.current = '';
             }
 
@@ -391,30 +484,26 @@ export function useGeminiLive() {
             if (msg.serverContent?.turnComplete) {
               setIsStreaming(false);
 
-              // If user transcript was collected during this turn, ensure user message is added
+              // If user transcript was collected during this turn, ensure user message is finalized and placed before assistant
               const userSpeech = liveUserTextRef.current.trim();
               if (userSpeech) {
-                setMessages((prev) => {
-                  const alreadyPresent = prev.some(
-                    (m) => m.sender === 'user' && m.content.trim() === userSpeech
-                  );
-                  if (alreadyPresent) return prev;
-                  return [
-                    ...prev,
-                    {
-                      id: `user-${Date.now()}`,
-                      sender: 'user',
-                      avatarType: 'user',
-                      content: userSpeech,
-                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    },
-                  ];
-                });
-                liveUserTextRef.current = '';
+                if (!liveUserMsgIdRef.current) {
+                  liveUserMsgIdRef.current = `live-u-${Date.now()}`;
+                }
+                const userMsg: ChatMessage = {
+                  id: liveUserMsgIdRef.current,
+                  sender: 'user',
+                  avatarType: 'user',
+                  content: userSpeech,
+                  timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                };
+                setMessages((prev) => insertUserMessageChronologically(prev, userMsg, liveAssistantMsgIdRef.current));
               }
 
               liveAssistantMsgIdRef.current = null;
               liveAssistantTextRef.current = '';
+              liveUserMsgIdRef.current = null;
+              liveUserTextRef.current = '';
             }
 
             // Tool Calling dispatch with complete trace collection & ChatDrawer rendering
@@ -424,11 +513,11 @@ export function useGeminiLive() {
                 : [];
               if (calls.length > 0) {
                 if (!liveAssistantMsgIdRef.current) {
-                  liveAssistantMsgIdRef.current = `msg_${Date.now()}`;
+                  liveAssistantMsgIdRef.current = `live-a-${Date.now()}`;
                 }
                 const currentMsgId = liveAssistantMsgIdRef.current;
 
-                // Ensure assistant message card exists with toolCalls attached
+                // Ensure assistant message card exists with toolCalls attached, and user message is placed before it
                 setMessages((prev) => {
                   const existing = prev.find((m) => m.id === currentMsgId);
                   if (existing) {
@@ -442,18 +531,32 @@ export function useGeminiLive() {
                         : m
                     );
                   } else {
-                    return [
-                      ...prev,
-                      {
-                        id: currentMsgId,
-                        sender: 'assistant',
-                        avatarType: 'akki',
-                        content: liveAssistantTextRef.current || '',
+                    const assistantMsg: ChatMessage = {
+                      id: currentMsgId,
+                      sender: 'assistant',
+                      avatarType: 'akki',
+                      content: liveAssistantTextRef.current || '',
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      toolCalls: calls,
+                      toolTraces: [],
+                    };
+
+                    const userSpeech = liveUserTextRef.current.trim();
+                    if (userSpeech && (!liveUserMsgIdRef.current || !prev.some((m) => m.id === liveUserMsgIdRef.current))) {
+                      if (!liveUserMsgIdRef.current) {
+                        liveUserMsgIdRef.current = `live-u-${Date.now()}`;
+                      }
+                      const userMsg: ChatMessage = {
+                        id: liveUserMsgIdRef.current,
+                        sender: 'user',
+                        avatarType: 'user',
+                        content: userSpeech,
                         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                        toolCalls: calls,
-                        toolTraces: [],
-                      },
-                    ];
+                      };
+                      return [...prev, userMsg, assistantMsg];
+                    }
+
+                    return [...prev, assistantMsg];
                   }
                 });
 
@@ -464,7 +567,9 @@ export function useGeminiLive() {
                   const tStart = performance.now();
                   try {
                     let result: any = { success: true };
-                    if ((window as any).electronAPI?.invoke) {
+                    if ((window as any).electronAPI?.executeTool) {
+                      result = await (window as any).electronAPI.executeTool(call.name, call.args || {});
+                    } else if ((window as any).electronAPI?.invoke) {
                       result = await (window as any).electronAPI.invoke('tools:execute', {
                         toolName: call.name,
                         args: call.args || {},
@@ -500,6 +605,13 @@ export function useGeminiLive() {
                       id: call.id,
                       response: { result },
                     });
+
+                    if (result?.shouldDisconnect) {
+                      setTimeout(() => {
+                        cleanup();
+                        setAssistantStatus('standby');
+                      }, 1200);
+                    }
                   } catch (toolErr: any) {
                     const durationMs = Math.round(performance.now() - tStart);
                     newTraces.push({
@@ -515,6 +627,7 @@ export function useGeminiLive() {
                     });
                   }
                 }
+
 
                 // Update messages state with completed traces so ToolTraceCard renders immediately
                 if (newTraces.length > 0) {

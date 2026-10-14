@@ -187,46 +187,195 @@ export class ToolRegistry {
     // 7. agent_assign_task
     this.register({
       name: 'agent_assign_task',
-      description: 'Delegate a background task to a specialist sub-agent (Leo, Rancho, Raju, Chatur).',
-      execute: async ({ agent_name, task_title, description }: any) => {
-        const assignedTask = this.agentCoordinator.assignTask(agent_name, task_title, description);
-        return { success: true, task: assignedTask };
+      description:
+        'Assign a task to one of the 4 AI agents in Agent Town: Leo, Rancho, Raju, or Chatur. If agent_name is omitted, automatically picks the first idle agent. Use this when a task needs background execution while you keep talking, or requires multi-step research/automation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          task: {
+            type: 'string',
+            description: 'Clear, self-contained task description for the agent. Include all context, URLs, constraints, and expected output.',
+          },
+          agent_name: {
+            type: 'string',
+            enum: ['Leo', 'Rancho', 'Raju', 'Chatur'],
+            description: 'Optional. Which agent to assign the task to. If omitted, the first idle agent is picked automatically.',
+          },
+          task_title: {
+            type: 'string',
+            description: 'Optional short title for the task.',
+          },
+          continue_context: {
+            type: 'string',
+            enum: ['continue', 'fresh'],
+            description: 'Whether the agent should remember its previous conversation.',
+          },
+        },
+        required: ['task'],
+      },
+      execute: async ({ task, agent_name, task_title, description }: any) => {
+        const title = task_title || (task ? task.slice(0, 40) : 'Agent Task');
+        const desc = description || task || title;
+        const assignedTask = this.agentCoordinator.assignTask(agent_name, title, desc);
+        return {
+          success: true,
+          result: `Task assigned to ${assignedTask.assignedTo} [${assignedTask.id}]`,
+          task: assignedTask,
+        };
       },
     });
 
     // 8. agent_list_agents
     this.register({
       name: 'agent_list_agents',
-      description: 'List the 4 sub-agents in Agent Town and their current states.',
+      description:
+        'List all 4 agents in Agent Town (Leo, Rancho, Raju, Chatur) with their current status (idle/running), what task they are working on, and their specialty. Use when user asks about Agent Town status, who is working, who is free/busy, or before assigning tasks.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
       execute: async () => {
-        return this.agentCoordinator.getAgentStates();
+        const agents = this.agentCoordinator.getAgentStates();
+        const runningTasks = this.agentCoordinator.getTasksByStatus('running');
+        const enriched = agents.map((agent) => {
+          const activeTask = agent.currentTaskId
+            ? this.agentCoordinator.getTask(agent.currentTaskId)
+            : runningTasks.find((t) => t.assignedTo === agent.name);
+          return {
+            name: agent.name,
+            role: agent.role,
+            specialty: agent.specialty,
+            status: agent.status === 'busy' || !!activeTask ? 'running' : 'idle',
+            currentTaskId: activeTask?.id || agent.currentTaskId,
+            currentTaskSnippet: activeTask?.taskTitle || activeTask?.description?.slice(0, 80) || undefined,
+          };
+        });
+        const summary = enriched.map((a) => {
+          const taskInfo = a.currentTaskSnippet ? ` (working on: "${a.currentTaskSnippet}")` : '';
+          return `• ${a.name} (${a.role}): ${a.status}${taskInfo}`;
+        });
+        return {
+          success: true,
+          result: `Agent Town status (${enriched.length} agents):\n${summary.join('\n')}`,
+          data: { agents: enriched },
+        };
+      },
+    });
+
+    // 8b. agent_list_tasks
+    this.register({
+      name: 'agent_list_tasks',
+      description:
+        'List all tasks currently running or queued across all Agent Town agents. Shows taskId, agent name, task message, and status.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => {
+        const tasks = this.agentCoordinator.getTasks();
+        const activeTasks = tasks.filter((t) => t.status === 'running' || t.status === 'queued');
+        if (activeTasks.length === 0) {
+          return {
+            success: true,
+            result: 'No active tasks in Agent Town.',
+            data: { count: 0, tasks: [] },
+          };
+        }
+        const lines = activeTasks.map(
+          (t) => `• ${t.assignedTo} [${t.status}]: "${(t.taskTitle || t.description || '').slice(0, 60)}"`
+        );
+        return {
+          success: true,
+          result: `${activeTasks.length} active task(s) in Agent Town:\n${lines.join('\n')}`,
+          data: { count: activeTasks.length, tasks: activeTasks },
+        };
       },
     });
 
     // 9. agent_inspect_task
     this.register({
       name: 'agent_inspect_task',
-      description: 'Inspect status, progress, and result of a delegated task.',
-      execute: async ({ task_id }: any) => {
-        const task = this.agentCoordinator.getTask(task_id);
-        return { task };
+      description:
+        'Inspect status, progress, and result of a delegated agent or task. Provide either agent_name ("Leo", "Rancho", "Raju", "Chatur") or task_id / run_id.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agent_name: {
+            type: 'string',
+            enum: ['Leo', 'Rancho', 'Raju', 'Chatur'],
+            description: 'Name of the agent to inspect.',
+          },
+          run_id: {
+            type: 'string',
+            description: 'Optional run ID of a specific task to inspect.',
+          },
+          task_id: {
+            type: 'string',
+            description: 'Optional task ID.',
+          },
+        },
+      },
+      execute: async ({ agent_name, run_id, task_id }: any) => {
+        const id = task_id || run_id;
+        if (id) {
+          const task = this.agentCoordinator.getTask(id);
+          return { success: true, task: task || null };
+        }
+        if (agent_name) {
+          const agent = this.agentCoordinator.getAgentState(agent_name);
+          const tasks = this.agentCoordinator.getTasksByAgent(agent_name);
+          const currentTask = tasks.find((t) => t.status === 'running') || tasks[0];
+          return {
+            success: true,
+            result: `${agent?.name || agent_name}: ${agent?.status || 'idle'}${
+              currentTask ? `\nCurrent task: "${currentTask.taskTitle}" (${currentTask.status})` : '\nNo active task'
+            }`,
+            data: { agent, task: currentTask || null },
+          };
+        }
+        return { success: false, error: 'Provide agent_name or task_id' };
       },
     });
 
     // 10. agent_stop_task & agent_cancel_task
     this.register({
       name: 'agent_stop_task',
-      description: 'Cancel or stop a running sub-agent task.',
+      description:
+        'Cancel or stop a running sub-agent task. Provide either agent_name ("Leo", "Rancho", "Raju", "Chatur") or task_id.',
       parameters: {
         type: 'object',
         properties: {
-          task_id: { type: 'string', description: 'ID of the task to stop' },
+          agent_name: {
+            type: 'string',
+            enum: ['Leo', 'Rancho', 'Raju', 'Chatur'],
+            description: 'Name of the agent whose task should be stopped.',
+          },
+          run_id: {
+            type: 'string',
+            description: 'Optional run ID of the task to stop.',
+          },
+          task_id: {
+            type: 'string',
+            description: 'Optional task ID to stop.',
+          },
         },
-        required: ['task_id'],
       },
-      execute: async ({ task_id }: any) => {
-        const stopped = this.agentCoordinator.stopTask(task_id);
-        return { success: stopped, taskId: task_id };
+      execute: async ({ agent_name, run_id, task_id }: any) => {
+        const id = task_id || run_id;
+        if (id) {
+          const stopped = this.agentCoordinator.stopTask(id);
+          return { success: stopped, taskId: id };
+        }
+        if (agent_name) {
+          const tasks = this.agentCoordinator.getTasksByAgent(agent_name);
+          const running = tasks.find((t) => t.status === 'running');
+          if (running) {
+            const stopped = this.agentCoordinator.stopTask(running.id);
+            return { success: stopped, agentName: agent_name, taskId: running.id };
+          }
+          return { success: true, message: `No running task found for agent ${agent_name}` };
+        }
+        return { success: false, error: 'Provide agent_name or task_id' };
       },
     });
 
@@ -245,6 +394,25 @@ export class ToolRegistry {
         return { success: stopped, taskId: task_id };
       },
     });
+
+    // 10b. end_session
+    this.register({
+      name: 'end_session',
+      description:
+        'End your own live AI session and go to sleep. The assistant stops listening and the voice connection is closed. Use this ONLY when the user explicitly asks YOU (the AI assistant itself) to sleep, shut down, go offline, or end the conversation — for example: "so jao", "band ho jao", "good night", "turn yourself off", "go to sleep". Do NOT use this if the user asks to turn off something else like a light, computer, app, or any external device.',
+      parameters: {
+        type: 'object',
+        properties: {},
+      },
+      execute: async () => {
+        return {
+          success: true,
+          result: 'Live session ending. Going offline now. Shubh ratri / Goodbye!',
+          shouldDisconnect: true,
+        };
+      },
+    });
+
 
     // 11. os_exec
     this.register({
