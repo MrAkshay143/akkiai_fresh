@@ -17,7 +17,7 @@ import {
   AssignAgentTaskSchema,
   InfoPanelSchema,
 } from '../../shared/schemas';
-import { DEFAULT_MODELS, AVAILABLE_MODELS, GEMINI_SPEAK_CHANNEL } from '../../shared/config/models';
+import { DEFAULT_MODELS, AVAILABLE_MODELS, DEFAULT_OPENROUTER_MODELS, GEMINI_SPEAK_CHANNEL } from '../../shared/config/models';
 import { LocalStore } from '../services/storage/local-store';
 import { firebaseService } from '../services/auth/firebase-service';
 import express from 'express';
@@ -2337,12 +2337,7 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     }
 
     const defaultGemini = [...AVAILABLE_MODELS.filter(m => !m.id.startsWith('google/'))];
-    const defaultOpenRouter = [
-      { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-      { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
-      { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Free' },
-      { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1' },
-    ];
+    const defaultOpenRouter = [...DEFAULT_OPENROUTER_MODELS];
 
     return {
       success: true,

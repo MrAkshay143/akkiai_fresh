@@ -15,6 +15,7 @@ import { useAppStore } from '@/state/useAppStore';
 import { LoginScreen } from '@/features/auth/LoginScreen';
 import { SplashScreen } from '@/features/splash/SplashScreen';
 import { audioPlayer } from '@/services/audio-player';
+import { GEMINI_SPEAK_CHANNEL } from '@shared/config/models';
 
 export const App: React.FC = () => {
   const [isBooting, setIsBooting] = React.useState(true);
@@ -214,7 +215,7 @@ export const App: React.FC = () => {
         const voiceName = localStorage.getItem('GEMINI_VOICE_NAME') || useAppStore.getState().settings.selectedVoice || 'Despina';
         if ((window as any).electronAPI?.invoke) {
           (window as any).electronAPI
-            .invoke('gemini-speak', {
+            .invoke(GEMINI_SPEAK_CHANNEL, {
               text: greetingText,
               voice: voiceName,
             })

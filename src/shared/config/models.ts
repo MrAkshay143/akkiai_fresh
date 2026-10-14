@@ -59,6 +59,22 @@ export const TOOL_CONFIG_AVAILABLE_MODELS = [
   'google/gemini-3.8-flash',
 ] as const;
 
+export const BUILTIN_OPENROUTER_MODELS = [
+  'google/gemini-3.8-flash',
+  'anthropic/claude-sonnet-4-5',
+  'openai/gpt-4o',
+  'deepseek/deepseek-r1',
+  'moonshotai/kimi-k2',
+  'meta-llama/llama-3.3-70b-instruct',
+] as const;
+
+export const DEFAULT_OPENROUTER_MODELS = [
+  { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
+  { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
+  { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Free' },
+  { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1' },
+] as const;
+
 export const FALLBACK_RETRY_MODELS = [
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',

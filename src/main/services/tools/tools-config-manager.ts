@@ -8,7 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import { app } from 'electron';
-import { DEFAULT_MODELS, TOOL_CONFIG_AVAILABLE_MODELS } from '../../../shared/config/models';
+import { DEFAULT_MODELS, TOOL_CONFIG_AVAILABLE_MODELS, BUILTIN_OPENROUTER_MODELS as CENTRAL_BUILTIN_OPENROUTER_MODELS } from '../../../shared/config/models';
 
 const CONFIG_FILE = 'tools_config.json';
 const GEMINI_MODELS_CACHE = 'cached_gemini_models.json';
@@ -94,14 +94,7 @@ export const DEFAULT_CONFIG: ToolsConfig = {
 
 export const BUILTIN_GEMINI_MODELS = [...TOOL_CONFIG_AVAILABLE_MODELS];
 
-export const BUILTIN_OPENROUTER_MODELS = [
-  'google/gemini-3.8-flash',
-  'anthropic/claude-sonnet-4-5',
-  'openai/gpt-4o',
-  'deepseek/deepseek-r1',
-  'moonshotai/kimi-k2',
-  'meta-llama/llama-3.3-70b-instruct',
-];
+export const BUILTIN_OPENROUTER_MODELS = [...CENTRAL_BUILTIN_OPENROUTER_MODELS];
 
 function getUserDataPath(): string {
   return app.getPath('userData');
