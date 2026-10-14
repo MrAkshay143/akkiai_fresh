@@ -41,49 +41,21 @@ export const CompanionHero: React.FC = () => {
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState<number>(window.innerWidth);
-
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const [isCameraLoading, setIsCameraLoading] = useState(false);
+  const [isScreenLoading, setIsScreenLoading] = useState(false);
 
-  // Resize observer to track exact available container width in center column
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
     window.addEventListener('resize', handleResize);
-
-    const el = wrapperRef.current?.parentElement || wrapperRef.current;
-    let ro: ResizeObserver | null = null;
-    if (el) {
-      const updateWidth = () => {
-        const w = el.getBoundingClientRect().width;
-        if (w > 0) setContainerWidth(w);
-      };
-      updateWidth();
-      ro = new ResizeObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.contentRect.width > 0) {
-            setContainerWidth(entry.contentRect.width);
-          }
-        }
-      });
-      ro.observe(el);
-    }
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (ro) ro.disconnect();
-    };
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // 1920x1080 is baseline perfect: gap is 340px, scale is 1
-  // On narrower screen containers (1600x900, 1280x800), gap contracts and scale fits container perfectly
-  const isLargeScreen = windowWidth >= 1900 || containerWidth >= 920;
-  const baseGap = isLargeScreen ? 340 : Math.max(30, Math.min(340, containerWidth - 620));
-  const naturalWidth = 220 + baseGap + 400; // 620 + baseGap
-  const scale = isLargeScreen ? 1 : Math.min(1, Math.max(0.4, (containerWidth - 12) / naturalWidth));
-  const gapToGlobe = baseGap;
+  const isMobile = windowWidth < 768;
+  const isTablet = windowWidth >= 768 && windowWidth < 1280;
+  const gapToGlobe = isMobile ? 40 : isTablet ? 100 : 340;
 
   // Camera Management
   const stopCamera = () => {
@@ -160,19 +132,13 @@ export const CompanionHero: React.FC = () => {
       : 'STANDBY';
 
   return (
-    <div
-      ref={wrapperRef}
-      className="w-full h-full flex items-center justify-center overflow-hidden"
-    >
+    <div className="w-full h-full flex items-center justify-center overflow-hidden">
       <div
-        className="flex items-center justify-center shrink-0 relative pt-2 md:pt-4 transition-transform duration-200 origin-center"
-        style={{
-          gap: gapToGlobe,
-          transform: scale < 1 ? `scale(${scale})` : undefined,
-        }}
+        className="flex items-center justify-center max-w-[1200px] w-full mx-auto relative pt-2 md:pt-4"
+        style={{ gap: gapToGlobe }}
       >
         {/* ── Left Trigger Nodes (Memory, Soul, Skills, Settings with dynamic SVG fiber lines) ── */}
-        <div className="w-[220px] shrink-0 z-0 flex flex-col justify-center">
+        <div className="w-[150px] md:w-[220px] shrink-0 z-0 flex flex-col justify-center">
           <CompanionNodeTriggers
             setIsMemoryModalOpen={() => setActiveModal('memory')}
             setMemoryModalTab={() => setActiveModal('memory')}
@@ -185,7 +151,7 @@ export const CompanionHero: React.FC = () => {
         </div>
 
         {/* ── Center Stage Holographic Orb & Camera / Screen Hub ───────── */}
-        <div className="relative z-10 flex flex-col items-center justify-center p-2 shrink-0 h-full origin-center">
+        <div className="scale-[0.8] md:scale-100 origin-center relative z-10 flex flex-col items-center justify-center p-2 shrink-0">
           <video ref={previewVideoRef} autoPlay playsInline muted className="hidden" aria-hidden="true" />
           <canvas width={640} height={480} className="hidden" aria-hidden="true" />
           <CompanionOrbCard

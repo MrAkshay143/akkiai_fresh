@@ -11,6 +11,7 @@ import {
   ArrowLeft,
   Save,
   Search,
+  Activity,
 } from 'lucide-react';
 import { useAppStore } from '@/state/useAppStore';
 import { useAudio } from '@/shared/hooks/useAudio';
@@ -171,25 +172,32 @@ export const LeftPanel: React.FC = () => {
       <div className="relative z-10 flex-1 min-h-0 flex flex-col overflow-hidden px-4 py-2">
         {activeTab === 'tasks' ? (
           <div className="flex flex-col h-full overflow-hidden">
-            {/* Progress bar if tasks exist */}
-            {totalTasks > 0 && (
-              <div className="mb-2 p-2 rounded-lg bg-[#070c12]/60 border border-white/[0.05]">
-                <div className="flex items-center justify-between text-[10px] font-mono mb-1.5">
-                  <span className="text-white/50 flex items-center gap-1">
-                    <CheckCircle2 size={11} className="text-[#00e5ff]" /> Progress
-                  </span>
-                  <span className="text-[#00e5ff] font-bold">
-                    {completedCount}/{totalTasks} ({Math.round(progressPercent)}%)
-                  </span>
+            {/* Progress Status if tasks exist, or standby if 0 (Exact reference uv) */}
+            <div className="mb-2">
+              {totalTasks > 0 ? (
+                <div className="p-2 rounded-lg bg-[#070c12]/60 border border-white/[0.05]">
+                  <div className="flex justify-between items-center text-[11px] font-mono text-white/35 uppercase tracking-widest mb-1.5">
+                    <span className="flex items-center gap-1.5 py-0.5 text-white/80">
+                      <CheckCircle2 size={12} className="text-j-cyan" /> Progress Status
+                    </span>
+                    <span className="text-j-cyan font-bold text-[11px]">
+                      {completedCount}/{totalTasks} ({Math.round(progressPercent)}%)
+                    </span>
+                  </div>
+                  <div className="w-full h-1 bg-white/[0.03] rounded-full overflow-hidden border border-white/[0.01]">
+                    <div
+                      className="h-full bg-gradient-to-r from-j-cyan to-emerald-400 shadow-[0_0_8px_rgba(0,229,255,0.3)] transition-all duration-500 ease-out"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-[#00e5ff] to-emerald-400 transition-all duration-300 shadow-[0_0_8px_rgba(0,229,255,0.4)]"
-                    style={{ width: `${progressPercent}%` }}
-                  />
+              ) : (
+                <div className="text-[11px] font-mono text-white/35 uppercase tracking-widest flex items-center gap-1.5 py-0.5">
+                  <Activity size={12} className="text-j-cyan/40" />
+                  Operations status: standby
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Filter pills */}
             <div className="flex items-center justify-between gap-1 mb-2">
@@ -294,8 +302,14 @@ export const LeftPanel: React.FC = () => {
             {/* Scrollable Tasks List */}
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
               {filteredTasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full py-8 text-center text-white/30 text-xs font-mono">
-                  No tasks matching filter.
+                <div className="h-48 flex flex-col items-center justify-center gap-3 text-white/20 bg-white/[0.005] border border-dashed border-white/[0.04] rounded-xl p-5 my-auto">
+                  <div className="w-8 h-8 rounded-lg bg-white/[0.01] border border-white/[0.04] flex items-center justify-center">
+                    <Activity size={13} className="text-j-cyan/40" />
+                  </div>
+                  <div className="text-center">
+                    <p className="text-[11px] font-mono tracking-widest uppercase text-white/45">All Systems Nominal</p>
+                    <p className="text-[9.5px] text-white/20 mt-1">No active parameters queued for execution.</p>
+                  </div>
                 </div>
               ) : (
                 filteredTasks.map((task) => (
