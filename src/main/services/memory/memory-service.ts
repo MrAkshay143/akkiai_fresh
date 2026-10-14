@@ -200,8 +200,15 @@ export class MemoryService {
       const allowedFiles = ['MEMORY.md', 'SOUL.md', 'SKILLS.md'];
       if (!allowedFiles.includes(filename)) return false;
 
-      const path1 = path.join(this.hermesMemoriesDir, filename);
-      const path2 = path.join(this.akkiMemoryDir, filename);
+      let path1: string;
+      let path2: string;
+      if (filename === 'SOUL.md') {
+        path1 = path.join(this.hermesDir, filename);
+        path2 = this.akkiSoulFilePath;
+      } else {
+        path1 = path.join(this.hermesMemoriesDir, filename);
+        path2 = path.join(this.akkiMemoryDir, filename);
+      }
 
       const s1 = this.safeWriteFile(path1, content);
       const s2 = this.safeWriteFile(path2, content);

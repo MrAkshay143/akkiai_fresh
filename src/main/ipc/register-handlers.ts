@@ -1326,8 +1326,13 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('pick-folder', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ['openDirectory'],
+      title: 'Select Folder to Import',
     });
-    return canceled ? null : filePaths[0];
+    if (canceled || !filePaths || filePaths.length === 0) return null;
+    return {
+      name: path.basename(filePaths[0]),
+      path: filePaths[0],
+    };
   });
 
   ipcMain.handle('save-image', async (_event, { base64Data }: any) => {
@@ -2385,12 +2390,81 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     if (Array.isArray(chats)) ctx.chatsStore.set(chats);
     return true;
   });
-  ipcMain.handle('load-imported-folders', () => []);
-  ipcMain.handle('save-imported-folders', () => true);
-  ipcMain.handle('read-bootstrap-files', () => []);
+  const getFolderConfigPath = () => path.join(app.getPath('userData'), 'imported_folders.json');
+  ipcMain.handle('load-imported-folders', async () => {
+    try {
+      const p = getFolderConfigPath();
+      if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
+      return [];
+    } catch (e) {
+      return [];
+    }
+  });
+  ipcMain.handle('save-imported-folders', async (_event, folders: any) => {
+    try {
+      fs.writeFileSync(getFolderConfigPath(), JSON.stringify(folders, null, 2), 'utf8');
+      return true;
+    } catch (e) {
+      return false;
+    }
+  });
+  ipcMain.handle('read-bootstrap-files', async () => {
+    try {
+      const hermesDir = path.join(os.homedir(), '.hermes');
+      const hermesMemoriesDir = path.join(hermesDir, 'memories');
+
+      const readSafely = (filePath: string) => {
+        try {
+          if (fs.existsSync(filePath)) return fs.readFileSync(filePath, 'utf8');
+          return '';
+        } catch {
+          return '';
+        }
+      };
+
+      // Read SOUL.md and MEMORY.md (USER.md is deprecated)
+      let soul = readSafely(path.join(hermesDir, 'SOUL.md'));
+      if (!soul) soul = ctx.memoryService.readSoul() || '';
+
+      let memory = readSafely(path.join(hermesMemoriesDir, 'MEMORY.md'));
+      if (!memory) memory = ctx.memoryService.readRawMemory() || '';
+
+      // Dynamic Instruction Injection for Info Panels & Agent Town Routing
+      let finalMemory = memory;
+      const dynamicRules = `\n---
+CRITICAL SYSTEM DIRECTIVES: 
+1. UI ENFORCEMENT: For stock quotes and lists: Present the data as a clean Markdown table using open_info_panel. For News and General Research: Provide a DETAILED, comprehensive response. Read the search results and write a well-formatted analytical report in the panel. NEVER just dump a raw list of search links. ALWAYS include source URLs as clickable markdown links. DO NOT use HTML tags. If updating existing information, you MUST execute close_panel first, before executing open_info_panel. FOR WEATHER QUERIES: DO NOT use open_info_panel. Just reply directly in the chat/voice.
+  4. MERMAID DIAGRAMS: When using generate_diagram or mermaid_render, NEVER use inline classes (like :::class). Keep syntax extremely basic: NodeA["Text"] --> NodeB["Text"]. DO NOT use HTML tags inside node text. Failure to follow this will cause a PARSE ERROR. If the user asks to close, shrink, minimize or go back from the visual hub or diagram, use the close_panel tool with panel_id: "visual_hub".
+    5. HTML WIDGET ENGINE & DIRECT WEB CODING: When the user asks for any interactive UI, calculator, portfolio, personal website, web page, landing page, mini-game, chart, form, data visualization, or any rich visual component, use the render_widget tool directly. DO NOT send these to Agent Town. Write complete self-contained HTML with inline CSS and JS inside script tags. The widget window renders in the exact same HUD Info Panel design and size (760x580, rounded glass corners, cyan neon glow, scanlines, and titlebar). Only ONE widget window is kept open at a time; rendering a new widget automatically replaces and closes the previous one. To close a widget, use close_widget. VISUAL CONTRAST GUARANTEE: When generating any HTML widget or panel, ALWAYS ensure text color strongly contrasts with the background. Dark backgrounds (#060B16, #0D1525, #080D12, #000, or similar very dark colors) must use white (#fff), light gray (#e5e7eb), or bright accent text (#00e5ff, #0a84ff). NEVER place dark text on a dark background or light text on a light background. If uncertain about contrast, default to white text on a dark background. GLOBAL CLOSE RULE: When the user asks to "close all", "clear screen", or "close panels", you MUST execute BOTH 'close_panel' (with panel_id: "all") AND 'close_widget' (with widget_id: "all") simultaneously in the same turn to ensure the screen is completely cleared.
+  6. FILE SAVING & EXPLICIT CONFIRMATION: When the user asks to save an existing HTML widget, design, or code to the Desktop or a file (e.g. 'Desktop-e save koro' or 'save as html'):
+     - Execute 'fs_write' to write the file directly to the user Desktop.
+     - DO NOT call 'render_widget' again when the user is only asking to save! The widget is already created.
+     - You MUST ALWAYS verbally inform and explicitly confirm to the user immediately after saving, stating the exact filename and location (for example: 'আমি আপনার ফাইলের নাম [filename] দিয়ে ডেক্সটপে সেভ করে দিয়েছি।'). Never remain silent after saving.
+2. AGENT TOWN ROUTING LIMITS: NEVER use 'agent_assign_task' or any Agent Town subagents (Leo, Rancho, Raju, Chatur) for weather, live stock market data, top gainers, or simple news/web lookups. Strictly rely only on the text data returned by your 'web_search' tool to prevent quota exhaustion. Do the search YOURSELF immediately.
+3. AGENT TOWN CONTENT EXTRACTION: For whatever complex task you DO assign to Agent Town, append this rule to the task description: "When browsing, you are free to visit as many pages as necessary. However, DO NOT ingest or retain raw HTML, CSS, or JavaScript in your memory. You must extract ONLY the essential data relevant to the task using content extraction, summarize it into a short note, and completely discard the heavy page code before moving to the next page."
+7. SEARCH TOOL SELECTION: Use 'web_search' for quick factual 1-line queries (time, basic facts, unit conversion, current weather). Use 'deep_search' for stock prices, earnings reports, financial analysis, in-depth news articles, research papers, or whenever the user needs detailed analysis or images. 'deep_search' returns full Markdown including image links and tables. Always open deep_search results in the Info Panel via open_info_panel. If 'deep_search' returns an error or empty result, it has already silently fallen back to native search — just use the result as-is.`;
+      finalMemory += dynamicRules;
+
+      return {
+        soul,
+        user: '', // USER.md deprecated
+        memory: finalMemory,
+      };
+    } catch (e) {
+      console.error('[Bootstrap] Failed to read bootstrap files:', e);
+      return { soul: '', user: '', memory: '' };
+    }
+  });
   ipcMain.handle('read-raw-memory', () => ctx.memoryService.readRawMemory());
 
-  ipcMain.handle('skills-get-all', () => ctx.skillsService.listSkills());
+  ipcMain.handle('skills-get-all', async () => {
+    try {
+      const skills = ctx.skillsService.listSkills();
+      return { success: true, skills };
+    } catch (error: any) {
+      return { error: `Failed to load skills: ${error?.message || String(error)}` };
+    }
+  });
   ipcMain.handle('skills-load-content', async (_event, payload: any) => {
     const folderName = typeof payload === 'string' ? payload : (payload?.folderName || payload?.skillName || '');
     if (folderName && ctx.skillsService.loadSkillContent) {
@@ -2790,14 +2864,17 @@ export function registerIpcHandlers(ctx: IpcContext): void {
 
   ipcMain.handle('get-system-paths', () => {
     return {
-      userData: app.getPath('userData'),
-      appData: app.getPath('appData'),
-      home: app.getPath('home'),
-      temp: app.getPath('temp'),
-      documents: app.getPath('documents'),
-      logs: app.getPath('logs'),
       desktop: app.getPath('desktop'),
-      downloads: app.getPath('downloads')
+      documents: app.getPath('documents'),
+      downloads: app.getPath('downloads'),
+      pictures: app.getPath('pictures'),
+      music: app.getPath('music'),
+      videos: app.getPath('videos'),
+      home: app.getPath('home'),
+      appData: app.getPath('appData'),
+      userData: app.getPath('userData'),
+      temp: app.getPath('temp'),
+      logs: app.getPath('logs'),
     };
   });
 
