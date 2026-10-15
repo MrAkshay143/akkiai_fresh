@@ -2,18 +2,18 @@
 // All model IDs, default selections, suggestion lists, and migration mappings reside here.
 
 export const DEFAULT_MODELS = {
-  primary: 'gemini-3.8-flash', // Main text generation & system prompt engine
+  primary: 'gemini-3.5-flash', // Main text generation & system prompt engine (tested 200 OK)
   live: 'gemini-3.1-flash-live-preview', // Real-time bidirectional Voice Assistant (Gemini Live WebSocket)
-  agent: 'gemini-3.8-flash', // Sub-agent coordinator & task delegator
-  agentTown: 'gemini-3.1-flash-lite', // Agent Town default engine
-  toolGlobal: 'gemini-3.5-flash-lite', // Per-tool global fallback model
+  agent: 'gemini-3.5-flash', // Sub-agent coordinator & task delegator
+  agentTown: 'gemini-3.1-flash-lite', // Agent Town default engine (tested 200 OK)
+  toolGlobal: 'gemini-3.5-flash-lite', // Per-tool global fallback model (tested 200 OK)
   toolWebSearch: 'gemini-3.5-flash-lite',
-  toolWhatsapp: 'gemini-3.8-flash',
-  toolDashboard: 'gemini-3.8-flash',
-  toolSubagent: 'gemini-3.8-flash',
-  toolVoiceLive: 'gemini-3.8-flash-exp',
-  tts: 'gemini-3.8-flash-tts',
-  ttsFallback: 'gemini-3.8-flash',
+  toolWhatsapp: 'gemini-3.5-flash',
+  toolDashboard: 'gemini-3.5-flash',
+  toolSubagent: 'gemini-3.5-flash',
+  toolVoiceLive: 'gemini-3.5-flash',
+  tts: 'gemini-3.8-flash-tts', // Tested 200 OK
+  ttsFallback: 'gemini-3.5-flash',
   openRouterPrimary: 'google/gemini-3.5-flash',
   openRouterSubAgent: 'google/gemini-3.1-flash-lite',
   codex: 'gpt-5.5',
@@ -23,32 +23,33 @@ export const DEFAULT_MODELS = {
 export const GEMINI_SPEAK_CHANNEL = 'gemini-speak';
 
 export const AVAILABLE_MODELS = [
-  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+  { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash (Recommended)' },
   { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite' },
   { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
+  { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash' },
+  { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
   { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash Preview' },
   { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro Preview' },
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
-  { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' },
-  { id: 'gemini-3.8-flash-exp', name: 'Gemini 3.8 Flash Exp' },
-  { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Free' },
+  { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
+  { id: 'gemini-flash-lite-latest', name: 'Gemini Flash-Lite Latest' },
+  { id: 'gemini-pro-latest', name: 'Gemini Pro Latest' },
 ] as const;
 
 export const OPENROUTER_MODEL_SUGGESTIONS = [
-  'google/gemini-3.1-flash-lite',
   'google/gemini-3.5-flash',
+  'google/gemini-3.1-flash-lite',
   'anthropic/claude-sonnet-4.6',
   'openai/gpt-5.5',
   'moonshotai/kimi-k2.5',
 ] as const;
 
 export const GEMINI_MODEL_SUGGESTIONS = [
-  'gemini-3.1-flash-lite',
   'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-flash-lite',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
   'gemini-3-flash-preview',
-  'gemini-3.1-pro-preview',
 ] as const;
 
 export const OPENAI_CODEX_MODEL_SUGGESTIONS = [
@@ -60,17 +61,18 @@ export const OPENAI_CODEX_MODEL_SUGGESTIONS = [
 ] as const;
 
 export const TOOL_CONFIG_AVAILABLE_MODELS = [
-  'gemini-3.8-flash',
+  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
-  'gemini-2.5-flash',
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-3.8-flash-exp',
-  'google/gemini-3.8-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
 ] as const;
 
 export const BUILTIN_OPENROUTER_MODELS = [
-  'google/gemini-3.8-flash',
+  'google/gemini-3.5-flash',
+  'google/gemini-3.1-flash-lite',
   'anthropic/claude-sonnet-4-5',
   'openai/gpt-4o',
   'deepseek/deepseek-r1',
@@ -79,26 +81,32 @@ export const BUILTIN_OPENROUTER_MODELS = [
 ] as const;
 
 export const DEFAULT_OPENROUTER_MODELS = [
+  { id: 'google/gemini-3.5-flash', name: 'Gemini 3.5 Flash' },
+  { id: 'google/gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash Lite' },
   { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
   { id: 'meta-llama/llama-3.3-70b-instruct', name: 'Llama 3.3 70B' },
-  { id: 'google/gemini-2.0-flash-exp:free', name: 'Gemini 2.0 Flash Free' },
   { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1' },
 ] as const;
 
 export const FALLBACK_RETRY_MODELS = [
+  'gemini-3.5-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
+  'gemini-3.6-flash',
   'gemini-3-flash-preview',
-  'gemini-3.5-flash',
   'gemini-3.8-flash',
 ] as const;
 
 export const DEPRECATED_MODELS = [
-  'gemini-2.0-flash',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
   'gemini-1.5-flash',
   'gemini-1.5-pro',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-exp',
+  'gemini-2.5-flash',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-3.8-flash-exp',
+  'google/gemini-2.0-flash-exp:free',
 ] as const;
 
 export function isDeprecatedModel(model: string | undefined | null): boolean {
