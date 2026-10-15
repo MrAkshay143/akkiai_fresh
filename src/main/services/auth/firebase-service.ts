@@ -117,6 +117,27 @@ class FirebaseService {
     return !!this.auth?.currentUser;
   }
 
+  getCurrentUser(): { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null } | null {
+    if (this.auth?.currentUser) {
+      return {
+        uid: this.auth.currentUser.uid,
+        email: this.auth.currentUser.email,
+        displayName: this.auth.currentUser.displayName,
+        photoURL: this.auth.currentUser.photoURL,
+      };
+    }
+    try {
+      const sessionPath = path.join(app.getPath('userData'), 'firebase_session.json');
+      if (fs.existsSync(sessionPath)) {
+        const cached = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+        if (cached && (cached.email || cached.uid)) {
+          return cached;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   async signOutUser(): Promise<void> {
     if (this.auth) {
       await signOut(this.auth);

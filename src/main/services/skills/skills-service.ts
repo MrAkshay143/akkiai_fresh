@@ -5,176 +5,325 @@ import * as path from 'path';
 export interface SkillConfig {
   name: string;
   description: string;
-  category: string;
+  category?: string;
+  author?: string;
+  version?: string;
+  tags?: string[];
   enabled: boolean;
   isCore: boolean;
 }
 
 export interface SkillData extends SkillConfig {
   folderName: string;
-  content: string;
+  filePath?: string;
+  content?: string;
 }
 
-const DEFAULT_SKILLS = [
-  { folderName: 'web_search', name: 'Web & Live Market Search', description: 'Research', category: 'Research', enabled: true, isCore: true, content: '# Web Search\n\nSkill content goes here.' },
-  { folderName: 'deep_search', name: 'Deep Page Reader (Jina)', description: 'Research', category: 'Research', enabled: true, isCore: true, content: '# Deep Search\n\nSkill content goes here.' },
-  { folderName: 'open_info_panel', name: 'Native HUD Info Windows', description: 'System', category: 'System', enabled: true, isCore: true, content: '# Open Info Panel\n\nSkill content goes here.' },
-  { folderName: 'fs_tools', name: 'Filesystem Safe Access', description: 'System', category: 'System', enabled: true, isCore: true, content: '# FS Tools\n\nSkill content goes here.' },
-  { folderName: 'os_exec', name: 'Restricted Terminal Shell', description: 'System', category: 'System', enabled: true, isCore: true, content: '# OS Exec\n\nSkill content goes here.' },
-  { folderName: 'agent_town', name: 'Sub-Agent Delegation', description: 'Agents', category: 'Agents', enabled: true, isCore: true, content: '# Agent Town\n\nSkill content goes here.' },
-  { folderName: 'media_player', name: 'Neural Media & YouTube', description: 'Media', category: 'Media', enabled: true, isCore: true, content: '# Media Player\n\nSkill content goes here.' }
-];
+export interface ParsedSkill extends Record<string, any> {
+  name?: string;
+  description?: string;
+  author?: string;
+  version?: string;
+  tags?: string[];
+  category?: string;
+  body: string;
+  filePath: string;
+}
+
+const parseSkillMd = (content: string, filePath: string): ParsedSkill | null => {
+  const cleaned = content.replace(/^\uFEFF/, '');
+  const normalized = cleaned.replace(/\r\n/g, '\n');
+  const frontmatterMatch = normalized.match(/^---\s*\n([\s\S]*?)\n---\s*\n/);
+  if (!frontmatterMatch) return null;
+
+  const yamlBlock = frontmatterMatch[1];
+  const body = normalized.slice(frontmatterMatch[0].length).trim();
+  const meta: Record<string, any> = {};
+
+  for (const line of yamlBlock.split('\n')) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx === -1) continue;
+    const key = line.slice(0, colonIdx).trim();
+    let value: any = line.slice(colonIdx + 1).trim();
+
+    if (value.startsWith('[') && value.endsWith(']')) {
+      value = value
+        .slice(1, -1)
+        .split(',')
+        .map((item: string) => item.trim().replace(/['"]/g, ''));
+    }
+    if (value === 'true') value = true;
+    else if (value === 'false') value = false;
+    else if (
+      typeof value === 'string' &&
+      ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'")))
+    ) {
+      value = value.slice(1, -1);
+    }
+    meta[key] = value;
+  }
+
+  return { ...meta, body, filePath };
+};
 
 export class SkillsService {
-  private skillsDir: string;
-
   constructor() {
-    const userDataPath = app.getPath('userData');
-    this.skillsDir = path.join(userDataPath, 'akki-skills');
-    this.ensureSkillsDir();
+    this.ensureDirs();
   }
 
-  private ensureSkillsDir() {
-    if (!fs.existsSync(this.skillsDir)) {
-      fs.mkdirSync(this.skillsDir, { recursive: true });
-      this.seedDefaultSkills();
-    } else {
-      const entries = fs.readdirSync(this.skillsDir);
-      if (entries.length === 0) {
-        this.seedDefaultSkills();
+  public getCustomSkillsDir(): string {
+    const akkiDir = path.join(app.getPath('documents'), 'Akki Data', 'skills', 'custom');
+    const stonicDir = path.join(app.getPath('documents'), 'Stonic Data', 'skills', 'custom');
+    if (fs.existsSync(akkiDir)) return akkiDir;
+    if (fs.existsSync(stonicDir)) return stonicDir;
+    if (!fs.existsSync(akkiDir)) {
+      try {
+        fs.mkdirSync(akkiDir, { recursive: true });
+      } catch (_) {}
+    }
+    return akkiDir;
+  }
+
+  public getCoreSkillsDir(): string {
+    const coreDir = app.isPackaged
+      ? path.join(process.resourcesPath, 'skills', 'core')
+      : path.join(process.cwd(), 'skills', 'core');
+
+    if (!app.isPackaged && !fs.existsSync(coreDir)) {
+      try {
+        fs.mkdirSync(coreDir, { recursive: true });
+      } catch (_) {}
+    }
+    return coreDir;
+  }
+
+  private ensureDirs() {
+    try {
+      const customDir = this.getCustomSkillsDir();
+      const stateDir = path.join(customDir, '..', '.states');
+      if (!fs.existsSync(stateDir)) {
+        fs.mkdirSync(stateDir, { recursive: true });
+      }
+    } catch (_) {}
+  }
+
+  private loadSkillsFromDir(dir: string, isCore: boolean): SkillData[] {
+    const skills: SkillData[] = [];
+    if (!fs.existsSync(dir)) return skills;
+
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (_error) {
+      return skills;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          const skillPath = path.join(dir, entry.name);
+          try {
+            const content = fs.readFileSync(skillPath, 'utf8');
+            const parsed = parseSkillMd(content, skillPath);
+            if (parsed && parsed.name) {
+              const stateFolderName = `core-${entry.name.replace('.md', '')}`;
+              const statePath = path.join(this.getCustomSkillsDir(), '..', '.states', `${stateFolderName}.json`);
+              let enabled = true;
+              if (fs.existsSync(statePath)) {
+                try {
+                  const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+                  enabled = state.enabled !== false;
+                } catch (_stateError) {
+                  enabled = true;
+                }
+              }
+
+              skills.push({
+                name: parsed.name,
+                description: parsed.description || '',
+                author: parsed.author || 'Akki Ai',
+                version: parsed.version || '1.0.0',
+                tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+                enabled,
+                folderName: entry.name,
+                filePath: skillPath,
+                isCore: true,
+                category: parsed.category || 'Core',
+                content: parsed.body || '',
+              });
+            }
+          } catch (error: any) {
+            console.error(`[Skills] Error reading flat skill ${entry.name}:`, error?.message);
+          }
+        }
+        continue;
+      }
+
+      const skillPath = path.join(dir, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillPath)) continue;
+
+      try {
+        const content = fs.readFileSync(skillPath, 'utf8');
+        const parsed = parseSkillMd(content, skillPath);
+        if (parsed && parsed.name) {
+          let statePath = path.join(dir, entry.name, '.state.json');
+          if (isCore) {
+            const stateDir = path.join(this.getCustomSkillsDir(), '..', '.states');
+            if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
+            statePath = path.join(stateDir, `core-${entry.name}.json`);
+          }
+
+          let enabled = true;
+          if (fs.existsSync(statePath)) {
+            try {
+              const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+              enabled = state.enabled !== false;
+            } catch (_stateError) {
+              enabled = true;
+            }
+          }
+
+          skills.push({
+            name: parsed.name,
+            description: parsed.description || '',
+            author: parsed.author || 'Unknown',
+            version: parsed.version || '1.0.0',
+            tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+            enabled,
+            folderName: entry.name,
+            filePath: skillPath,
+            isCore,
+            category: parsed.category || (isCore ? 'Core' : 'Custom'),
+            content: parsed.body || '',
+          });
+        }
+      } catch (error: any) {
+        console.error(`[Skills] Error reading skill ${entry.name}:`, error?.message);
       }
     }
+
+    return skills;
   }
 
-  private seedDefaultSkills() {
-    for (const skill of DEFAULT_SKILLS) {
-      const skillPath = path.join(this.skillsDir, skill.folderName);
-      if (!fs.existsSync(skillPath)) {
-        fs.mkdirSync(skillPath, { recursive: true });
+  public getAllSkills(): { success: boolean; skills: SkillData[] } {
+    try {
+      const coreSkills = this.loadSkillsFromDir(this.getCoreSkillsDir(), true);
+      const customSkills = this.loadSkillsFromDir(this.getCustomSkillsDir(), false);
+      const mergedSkills = [...customSkills];
+
+      for (const coreSkill of coreSkills) {
+        if (!mergedSkills.find((skill) => skill.name === coreSkill.name)) {
+          mergedSkills.push(coreSkill);
+        }
       }
-      
-      const config: SkillConfig = {
-        name: skill.name,
-        description: skill.description,
-        category: skill.category,
-        enabled: skill.enabled,
-        isCore: skill.isCore
-      };
-      
-      fs.writeFileSync(path.join(skillPath, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
-      fs.writeFileSync(path.join(skillPath, 'content.md'), skill.content, 'utf-8');
+
+      return { success: true, skills: mergedSkills };
+    } catch (error: any) {
+      console.error('[Skills] Failed to get all skills:', error);
+      return { success: false, skills: [] };
     }
   }
 
   public listSkills(): SkillData[] {
-    const skills: SkillData[] = [];
-    if (!fs.existsSync(this.skillsDir)) return skills;
-
-    const entries = fs.readdirSync(this.skillsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (entry.isDirectory()) {
-        const folderName = entry.name;
-        const skillPath = path.join(this.skillsDir, folderName);
-        const configPath = path.join(skillPath, 'config.json');
-        const contentPath = path.join(skillPath, 'content.md');
-
-        if (fs.existsSync(configPath) && fs.existsSync(contentPath)) {
-          try {
-            const configData = fs.readFileSync(configPath, 'utf-8');
-            const config: SkillConfig = JSON.parse(configData);
-            const content = fs.readFileSync(contentPath, 'utf-8');
-
-            skills.push({
-              folderName,
-              ...config,
-              content
-            });
-          } catch (err) {
-            console.error(`[SkillsService] Error reading skill ${folderName}:`, err);
-          }
-        }
-      }
-    }
-    return skills;
+    return this.getAllSkills().skills;
   }
 
-  public toggleSkill(folderName: string, enabled: boolean, isCore: boolean): boolean {
+  public loadSkillContent(skillName: string): { success: boolean; content?: string; metadata?: any; isCore?: boolean; error?: string } {
     try {
-      const skillPath = path.join(this.skillsDir, folderName);
-      const configPath = path.join(skillPath, 'config.json');
-      if (!fs.existsSync(configPath)) return false;
+      const allSkills = this.listSkills();
+      const skillMeta = allSkills.find((skill) => skill.name === skillName || skill.folderName === skillName);
 
-      const configData = fs.readFileSync(configPath, 'utf-8');
-      const config: SkillConfig = JSON.parse(configData);
-      
-      // We can ignore isCore matching or just enforce it
-      config.enabled = enabled;
-      
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-      return true;
-    } catch (err) {
-      console.error(`[SkillsService] Error toggling skill ${folderName}:`, err);
-      return false;
+      if (!skillMeta || !skillMeta.filePath || !fs.existsSync(skillMeta.filePath)) {
+        return { success: false, error: `Skill "${skillName}" not found` };
+      }
+
+      const content = fs.readFileSync(skillMeta.filePath, 'utf8');
+      const parsed = parseSkillMd(content, skillMeta.filePath);
+      if (parsed) {
+        return { success: true, content: parsed.body, metadata: parsed, isCore: skillMeta.isCore };
+      }
+
+      return { success: false, error: `Failed to parse skill "${skillName}"` };
+    } catch (error: any) {
+      return { success: false, error: `Failed to load skill: ${error.message}` };
     }
   }
 
-  public saveSkill(data: { name: string; description: string; content: string; folderName: string; isCore: boolean; category?: string }): boolean {
+  public saveSkill(data: {
+    name: string;
+    description?: string;
+    author?: string;
+    version?: string;
+    tags?: string[] | string;
+    content: string;
+    folderName?: string;
+    isCore?: boolean;
+    category?: string;
+  }): { success: boolean; filePath?: string; folderName?: string; error?: string } {
     try {
-      const folderName = data.folderName || data.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
-      const skillPath = path.join(this.skillsDir, folderName);
-      
-      if (!fs.existsSync(skillPath)) {
-        fs.mkdirSync(skillPath, { recursive: true });
-      }
+      const customSkillsDir = this.getCustomSkillsDir();
+      let safeFolderName = data.folderName || data.name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-');
+      safeFolderName = safeFolderName.replace('.md', '');
 
-      let config: SkillConfig = {
-        name: data.name,
-        description: data.description,
-        category: data.category || 'Custom',
-        enabled: true,
-        isCore: data.isCore || false
-      };
+      const skillDir = path.join(customSkillsDir, safeFolderName);
+      if (!fs.existsSync(skillDir)) fs.mkdirSync(skillDir, { recursive: true });
 
-      const configPath = path.join(skillPath, 'config.json');
-      if (fs.existsSync(configPath)) {
-        const existingData = fs.readFileSync(configPath, 'utf-8');
-        const existingConfig: SkillConfig = JSON.parse(existingData);
-        config = { ...existingConfig, ...config }; // merge updates
-      }
+      const tagsStr = Array.isArray(data.tags)
+        ? `[${data.tags.join(', ')}]`
+        : (data.tags || '[]');
+      const frontmatter = [
+        '---',
+        `name: ${data.name}`,
+        `description: ${data.description || ''}`,
+        `author: ${data.author || 'User'}`,
+        `version: ${data.version || '1.0.0'}`,
+        `tags: ${tagsStr}`,
+        '---',
+      ].join('\n');
 
-      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-      fs.writeFileSync(path.join(skillPath, 'content.md'), data.content, 'utf-8');
-      return true;
-    } catch (err) {
-      console.error(`[SkillsService] Error saving skill:`, err);
-      return false;
+      const fullContent = `${frontmatter}\n\n${data.content || `# ${data.name}\n\nAdd your skill instructions here.`}`;
+      const skillPath = path.join(skillDir, 'SKILL.md');
+      fs.writeFileSync(skillPath, fullContent, 'utf8');
+
+      return { success: true, filePath: skillPath, folderName: safeFolderName };
+    } catch (error: any) {
+      return { success: false, error: `Failed to save skill: ${error.message}` };
     }
   }
 
-  public deleteSkill(folderName: string, isCore: boolean): boolean {
+  public deleteSkill(folderName: string, isCore?: boolean): { success: boolean; error?: string } {
     try {
-      if (isCore) return false; // Safety check
-      
-      const skillPath = path.join(this.skillsDir, folderName);
-      if (!fs.existsSync(skillPath)) return false;
+      if (isCore) {
+        return { success: false, error: 'Core skills cannot be deleted.' };
+      }
 
-      fs.rmSync(skillPath, { recursive: true, force: true });
-      return true;
-    } catch (err) {
-      console.error(`[SkillsService] Error deleting skill ${folderName}:`, err);
-      return false;
+      const skillDir = path.join(this.getCustomSkillsDir(), folderName);
+      if (!fs.existsSync(skillDir)) return { success: false, error: 'Skill folder not found' };
+
+      fs.rmSync(skillDir, { recursive: true, force: true });
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: `Failed to delete skill: ${error.message}` };
     }
   }
 
-  public loadSkillContent(folderName: string): string {
+  public toggleSkill(folderName: string, enabled: boolean, isCore?: boolean): { success: boolean; error?: string } {
     try {
-      const contentPath = path.join(this.skillsDir, folderName, 'content.md');
-      if (fs.existsSync(contentPath)) {
-        return fs.readFileSync(contentPath, 'utf-8');
+      let statePath: string;
+      if (isCore) {
+        const stateDir = path.join(this.getCustomSkillsDir(), '..', '.states');
+        if (!fs.existsSync(stateDir)) fs.mkdirSync(stateDir, { recursive: true });
+        statePath = path.join(stateDir, `core-${folderName.replace('.md', '')}.json`);
+      } else {
+        const skillDir = path.join(this.getCustomSkillsDir(), folderName);
+        if (!fs.existsSync(skillDir)) return { success: false, error: 'Skill not found' };
+        statePath = path.join(skillDir, '.state.json');
       }
-    } catch (err) {
-      console.error(`[SkillsService] Error reading skill content for ${folderName}:`, err);
+
+      fs.writeFileSync(statePath, JSON.stringify({ enabled }), 'utf8');
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: `Failed to toggle skill: ${error.message}` };
     }
-    return '';
   }
 }

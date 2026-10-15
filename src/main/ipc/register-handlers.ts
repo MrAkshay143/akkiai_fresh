@@ -687,6 +687,95 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     return true;
   };
 
+  const getGroqKeyFromDiskOrStore = (): string => {
+    try {
+      const p = getUserDataPath('groq_key.json');
+      if (fs.existsSync(p)) {
+        const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const key = data?.apiKey || data?.groqKey || data?.key || (typeof data === 'string' ? data : '');
+        if (key && typeof key === 'string' && key.trim()) return key.trim();
+      }
+    } catch {}
+    try {
+      const skp = getUserDataPath('secret_key.json');
+      if (fs.existsSync(skp)) {
+        const data = JSON.parse(fs.readFileSync(skp, 'utf8'));
+        const key = data?.data?.groqKey || data?.groqKey;
+        if (key && typeof key === 'string' && key.trim()) return key.trim();
+      }
+    } catch {}
+    return process.env.GROQ_API_KEY || '';
+  };
+
+  const saveGroqKeyToDiskAndStore = (token: string): boolean => {
+    const cleanToken = String(token || '').trim();
+    try {
+      const p = getUserDataPath('groq_key.json');
+      fs.writeFileSync(
+        p,
+        JSON.stringify({ apiKey: cleanToken, groqKey: cleanToken, key: cleanToken, updatedAt: Date.now() }, null, 2),
+        'utf8'
+      );
+    } catch (e) {
+      console.warn('[IPC] Error writing groq_key.json:', e);
+    }
+    return true;
+  };
+
+  const getKimiKeyFromDiskOrStore = (): string => {
+    try {
+      const p = getUserDataPath('kimi_key.json');
+      if (fs.existsSync(p)) {
+        const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const key = data?.apiKey || data?.kimiKey || data?.key || (typeof data === 'string' ? data : '');
+        if (key && typeof key === 'string' && key.trim()) return key.trim();
+      }
+    } catch {}
+    return process.env.KIMI_API_KEY || '';
+  };
+
+  const saveKimiKeyToDiskAndStore = (token: string): boolean => {
+    const cleanToken = String(token || '').trim();
+    try {
+      const p = getUserDataPath('kimi_key.json');
+      fs.writeFileSync(
+        p,
+        JSON.stringify({ apiKey: cleanToken, kimiKey: cleanToken, key: cleanToken, updatedAt: Date.now() }, null, 2),
+        'utf8'
+      );
+    } catch (e) {
+      console.warn('[IPC] Error writing kimi_key.json:', e);
+    }
+    return true;
+  };
+
+  const getJinaKeyFromDiskOrStore = (): string => {
+    try {
+      const p = getUserDataPath('jina_key.json');
+      if (fs.existsSync(p)) {
+        const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+        const key = data?.apiKey || data?.jinaKey || data?.key || (typeof data === 'string' ? data : '');
+        if (key && typeof key === 'string' && key.trim()) return key.trim();
+      }
+    } catch {}
+    return process.env.JINA_API_KEY || '';
+  };
+
+  const saveJinaKeyToDiskAndStore = (token: string): boolean => {
+    const cleanToken = String(token || '').trim();
+    try {
+      const p = getUserDataPath('jina_key.json');
+      fs.writeFileSync(
+        p,
+        JSON.stringify({ apiKey: cleanToken, jinaKey: cleanToken, key: cleanToken, updatedAt: Date.now() }, null, 2),
+        'utf8'
+      );
+    } catch (e) {
+      console.warn('[IPC] Error writing jina_key.json:', e);
+    }
+    return true;
+  };
+
   // ── Secret Key Files Handlers (secret_key.json, openrouter_key.json, hf_key.json) ──
   ipcMain.handle('get-secret-key', () => getSecretKeyFromDiskOrStore());
   ipcMain.handle('save-secret-key', (_event, keyOrObj: any) => {
@@ -725,6 +814,30 @@ export function registerIpcHandlers(ctx: IpcContext): void {
       ? (tokenOrObj?.apiKey || tokenOrObj?.key || tokenOrObj?.token || tokenOrObj?.openaiKey || '')
       : String(tokenOrObj || '');
     return saveOpenAIKeyToDiskAndStore(token);
+  });
+
+  ipcMain.handle('get-groq-token', () => getGroqKeyFromDiskOrStore());
+  ipcMain.handle('save-groq-token', (_event, tokenOrObj: any) => {
+    const token = typeof tokenOrObj === 'object'
+      ? (tokenOrObj?.apiKey || tokenOrObj?.groqKey || tokenOrObj?.token || tokenOrObj?.key || '')
+      : String(tokenOrObj || '');
+    return saveGroqKeyToDiskAndStore(token);
+  });
+
+  ipcMain.handle('get-kimi-token', () => getKimiKeyFromDiskOrStore());
+  ipcMain.handle('save-kimi-token', (_event, tokenOrObj: any) => {
+    const token = typeof tokenOrObj === 'object'
+      ? (tokenOrObj?.apiKey || tokenOrObj?.kimiKey || tokenOrObj?.token || tokenOrObj?.key || '')
+      : String(tokenOrObj || '');
+    return saveKimiKeyToDiskAndStore(token);
+  });
+
+  ipcMain.handle('get-jina-token', () => getJinaKeyFromDiskOrStore());
+  ipcMain.handle('save-jina-token', (_event, tokenOrObj: any) => {
+    const token = typeof tokenOrObj === 'object'
+      ? (tokenOrObj?.apiKey || tokenOrObj?.jinaKey || tokenOrObj?.token || tokenOrObj?.key || '')
+      : String(tokenOrObj || '');
+    return saveJinaKeyToDiskAndStore(token);
   });
 
   // Synchronize active provider and keys from agent_town_config.json and disk on startup
@@ -1341,23 +1454,86 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('read-file-content', async (_event, { path: filePath }: any) => {
     try {
       if (!filePath || !fs.existsSync(filePath)) return { error: 'File not found' };
-      const content = fs.readFileSync(filePath, 'utf-8');
-      return { content };
+
+      const mime = require('mime-types');
+      const mimeType = mime.lookup(filePath) || '';
+      const ext = path.extname(filePath).toLowerCase();
+      const buffer = fs.readFileSync(filePath);
+
+      if (mimeType === 'application/pdf' || ext === '.pdf') {
+        const pdfMod = require('pdf-parse');
+        const PDFParse = typeof pdfMod === 'function' ? pdfMod : pdfMod.PDFParse;
+        const data = await PDFParse(buffer);
+        return { content: data.text || '' };
+      }
+      if (
+        mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        ext === '.docx'
+      ) {
+        const mammoth = require('mammoth');
+        const result = await mammoth.extractRawText({ buffer });
+        return { content: result.value || '' };
+      }
+      if (
+        mimeType.startsWith('text/') ||
+        mimeType === 'application/json' ||
+        mimeType === 'application/javascript' ||
+        ['.txt', '.md', '.json', '.js', '.ts', '.tsx', '.css', '.html', '.xml', '.csv'].includes(ext)
+      ) {
+        return { content: buffer.toString('utf8') };
+      }
+
+      return {
+        content: `[Binary/Image File: ${path.basename(filePath)}]. The content of this file is visual or binary.`,
+      };
     } catch (err: any) {
-      return { error: err.message };
+      return { error: err?.message || 'Failed to read file' };
     }
   });
 
   ipcMain.handle('pick-and-read-files', async () => {
     const { canceled, filePaths } = await dialog.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
+      filters: [
+        {
+          name: 'Multimodal Files',
+          extensions: [
+            'jpg',
+            'png',
+            'jpeg',
+            'webp',
+            'pdf',
+            'doc',
+            'docx',
+            'txt',
+            'mp3',
+            'wav',
+            'mpeg',
+          ],
+        },
+      ],
     });
-    if (canceled) return [];
-    return filePaths.map((fp) => {
-      let content = '';
-      try { content = fs.readFileSync(fp, 'utf-8'); } catch (_) {}
-      return { name: path.basename(fp), path: fp, content };
-    });
+    if (canceled || !filePaths) return [];
+
+    const mime = require('mime-types');
+    const results: any[] = [];
+    for (const fp of filePaths) {
+      try {
+        const stats = fs.statSync(fp);
+        if (stats.size > 50 * 1024 * 1024) continue;
+
+        const buffer = fs.readFileSync(fp);
+        const mimeType = mime.lookup(fp) || 'application/octet-stream';
+        results.push({
+          name: path.basename(fp),
+          data: buffer.toString('base64'),
+          mimeType,
+          path: fp,
+          content: buffer.toString('utf8'),
+        });
+      } catch (_) {}
+    }
+    return results;
   });
 
   ipcMain.handle('pick-folder', async () => {
@@ -1453,20 +1629,31 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   ipcMain.handle('arduino-connect', async (_event, { port }: any = {}) => hardwareService.connect(port || 'COM3'));
   ipcMain.handle('arduino-disconnect', async () => hardwareService.disconnect());
   ipcMain.handle('arduino-digital-write', async (_event, { pin, value }: any) => hardwareService.digitalWrite(pin, value));
-  ipcMain.handle('arduino-digital-read', async (_event, { pin }: any) => ({ pin, value: 0 }));
-  ipcMain.handle('arduino-analog-write', async (_event, { pin, value }: any) => hardwareService.digitalWrite(pin, value));
+  ipcMain.handle('arduino-digital-read', async (_event, { pin }: any) => hardwareService.digitalRead(pin));
+  ipcMain.handle('arduino-analog-write', async (_event, { pin, value }: any) => hardwareService.analogWrite(pin, value));
   ipcMain.handle('arduino-analog-read', async (_event, { pin }: any) => hardwareService.analogRead(pin));
   ipcMain.handle('arduino-servo-write', async (_event, { pin, angle }: any) => hardwareService.servoWrite(pin, angle));
-  ipcMain.handle('arduino-set-pin-mode', async () => ({ success: true }));
-  ipcMain.handle('arduino-board-status', async () => ({ isConnected: hardwareService.isConnected() }));
-  ipcMain.handle('arduino-led-blink', async () => ({ success: true }));
-  ipcMain.handle('arduino-led-stop', async () => ({ success: true }));
+  ipcMain.handle('arduino-set-pin-mode', async (_event, { pin, mode }: any = {}) => hardwareService.setPinMode(pin, mode));
+  ipcMain.handle('arduino-board-status', async () => hardwareService.getBoardStatus());
+  ipcMain.handle('arduino-led-blink', async (_event, { pin, intervalMs }: any = {}) => hardwareService.ledBlink(pin, intervalMs));
+  ipcMain.handle('arduino-led-stop', async (_event, { pin }: any = {}) => hardwareService.ledStop(pin));
 
   // ── 18. WhatsApp Channel Aliases ──────────────────────────────────────────
   ipcMain.handle('whatsapp-get-state', () => whatsAppManager.getState());
   ipcMain.handle('whatsapp-init', async () => whatsAppManager.initialize());
   ipcMain.handle('whatsapp-logout', async () => whatsAppManager.logout());
-  ipcMain.handle('whatsapp-send-reply', async (_event, { to, message }: any) => whatsAppManager.sendReply(to, message));
+  ipcMain.handle('whatsapp-send-reply', async (_event, args: any) => {
+    try {
+      const chatId = args?.chatId || args?.to;
+      const message = args?.message;
+      if (!chatId) return { success: false, error: 'chatId or to is required' };
+      const sent = await whatsAppManager.sendReply(chatId, message);
+      if (sent) return { success: true };
+      return { success: false, error: 'WhatsApp client is not ready or message failed to send.' };
+    } catch (error: any) {
+      return { success: false, error: error?.message || 'Failed to send WhatsApp reply' };
+    }
+  });
   ipcMain.handle('send-whatsapp-keyboard', async (_event, args: any) => {
     try {
       const name = String(args?.name || '').trim();
@@ -2146,10 +2333,118 @@ export function registerIpcHandlers(ctx: IpcContext): void {
   });
 
   // ── 20. Agent Town & Hermes Handlers ──────────────────────────────────────
-  ipcMain.handle('agent-report-add', (_event, report: any) => ({ success: true, report }));
-  ipcMain.handle('agent-reports-mark-delivered', () => true);
-  ipcMain.handle('agent-reports-recent', () => []);
-  ipcMain.handle('agent-reports-undelivered', () => []);
+  const AGENT_REPORTS_MAX_TOTAL = 20;
+  const AGENT_REPORTS_MAX_PER_AGENT = 5;
+  const AGENT_REPORTS_DELIVERED_TTL_MS = 24 * 60 * 60 * 1000;
+
+  const getAgentReportsPath = () => getUserDataPath('agent_reports.json');
+
+  const readAgentReports = (): any[] => {
+    try {
+      const p = getAgentReportsPath();
+      if (fs.existsSync(p)) {
+        const parsed = JSON.parse(fs.readFileSync(p, 'utf8'));
+        return Array.isArray(parsed) ? parsed.filter((r) => r && typeof r === 'object') : [];
+      }
+    } catch (_) {}
+    return [];
+  };
+
+  const writeAgentReports = (reports: any[]) => {
+    try {
+      fs.writeFileSync(getAgentReportsPath(), JSON.stringify(reports, null, 2), 'utf8');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const cleanupAgentReports = (reports: any[]) => {
+    const now = Date.now();
+    let kept = reports.filter((r) => {
+      if (r.delivered && r.deliveredAt && now - r.deliveredAt > AGENT_REPORTS_DELIVERED_TTL_MS) {
+        return false;
+      }
+      return true;
+    });
+
+    kept.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+
+    const perAgent: Record<string, number> = {};
+    kept = kept.filter((r) => {
+      const key = String(r.agentName || 'unknown').toLowerCase();
+      perAgent[key] = (perAgent[key] || 0) + 1;
+      return perAgent[key] <= AGENT_REPORTS_MAX_PER_AGENT;
+    });
+
+    if (kept.length > AGENT_REPORTS_MAX_TOTAL) {
+      const undelivered = kept.filter((r) => !r.delivered);
+      const delivered = kept.filter((r) => r.delivered);
+      const room = Math.max(0, AGENT_REPORTS_MAX_TOTAL - undelivered.length);
+      kept = [...undelivered, ...delivered.slice(0, room)].sort(
+        (a, b) => (b.completedAt || 0) - (a.completedAt || 0)
+      );
+    }
+    return kept;
+  };
+
+  ipcMain.handle('agent-report-add', async (_event, payload: any) => {
+    try {
+      const result = String(payload?.result || '').trim();
+      if (!result) return null;
+      const entry = {
+        id: `rep_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        agentName: String(payload?.agentName || 'Agent').trim() || 'Agent',
+        taskSummary: String(payload?.taskSummary || '').trim().slice(0, 200),
+        result: result.slice(0, 8000),
+        completedAt: Date.now(),
+        delivered: false,
+        deliveredAt: null,
+      };
+      writeAgentReports(cleanupAgentReports([entry, ...readAgentReports()]));
+      return entry;
+    } catch (_) {
+      return null;
+    }
+  });
+
+  ipcMain.handle('agent-reports-undelivered', async () => {
+    try {
+      return readAgentReports()
+        .filter((r) => !r.delivered)
+        .sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+    } catch (_) {
+      return [];
+    }
+  });
+
+  ipcMain.handle('agent-reports-mark-delivered', async (_event, ids: any) => {
+    try {
+      const idSet = new Set(Array.isArray(ids) ? ids : []);
+      if (idSet.size === 0) return true;
+      const now = Date.now();
+      const updated = readAgentReports().map((r) =>
+        idSet.has(r.id) ? { ...r, delivered: true, deliveredAt: now } : r
+      );
+      return writeAgentReports(cleanupAgentReports(updated));
+    } catch (_) {
+      return false;
+    }
+  });
+
+  ipcMain.handle('agent-reports-recent', async (_event, opts: any) => {
+    try {
+      const limit = Math.max(1, Math.min(20, Number(opts?.limit) || 10));
+      const agentName = opts?.agentName ? String(opts.agentName).toLowerCase() : null;
+      let reports = readAgentReports();
+      if (agentName) {
+        reports = reports.filter((r) => String(r.agentName || '').toLowerCase() === agentName);
+      }
+      return reports.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0)).slice(0, limit);
+    } catch (_) {
+      return [];
+    }
+  });
   ipcMain.handle('get-sub-agent-config', async () => {
     try {
       const p = getUserDataPath('sub_agent_config.json');
@@ -2252,7 +2547,27 @@ export function registerIpcHandlers(ctx: IpcContext): void {
     }
   });
   ipcMain.handle('get-hermes-insights', () => ({}));
-  ipcMain.handle('get-hermes-memory', () => ctx.memoryService.readRawMemory());
+  ipcMain.handle('get-hermes-memory', async () => {
+    const hermesDir = path.join(os.homedir(), '.hermes');
+    const memDir = path.join(hermesDir, 'memories');
+    const readEntries = (filePath: string) => {
+      if (!fs.existsSync(filePath)) return [];
+      try {
+        const content = fs.readFileSync(filePath, 'utf8');
+        return content
+          .split('\n§\n')
+          .map((e) => e.trim())
+          .filter((e) => e.length > 0);
+      } catch (err) {
+        console.error('Error reading memory file:', filePath, err);
+        return [];
+      }
+    };
+    return {
+      user: [],
+      memory: readEntries(path.join(memDir, 'MEMORY.md')),
+    };
+  });
   ipcMain.handle('get-hermes-skills', () => ctx.skillsService.listSkills());
 
   // ── 21. Paths, Preferences, Updates & Misc ────────────────────────────────
@@ -2639,6 +2954,84 @@ CRITICAL SYSTEM DIRECTIVES:
     } catch (_) {
       return null;
     }
+  });
+
+  ipcMain.handle('load-user-profile', async () => {
+    try {
+      const p = getUserProfilePath();
+      const profileData: any = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf-8')) : {};
+      if (!profileData.name) {
+        const googleName = firebaseService.getCurrentUser()?.displayName || '';
+        if (googleName) {
+          profileData.name = googleName;
+        }
+      }
+      if (!profileData.location) {
+        profileData.location = '';
+      }
+      return profileData;
+    } catch (_) {
+      return { name: '', location: '' };
+    }
+  });
+
+  // ── Setup Guide Video Handlers ──────────────────────────────────────────────
+  ipcMain.handle('guide-video-should-play', async () => {
+    try {
+      const p = path.join(app.getPath('userData'), 'guide_video_seen.json');
+      return !fs.existsSync(p);
+    } catch {
+      return true;
+    }
+  });
+
+  ipcMain.handle('guide-video-mark-seen', async () => {
+    try {
+      const p = path.join(app.getPath('userData'), 'guide_video_seen.json');
+      fs.writeFileSync(p, JSON.stringify({ seen: true, at: Date.now() }));
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  // ── Reference App Data Types (load-* / save-*) ──────────────────────────────
+  const getRefDataFile = (fileName: string) => path.join(app.getPath('userData'), fileName);
+  const readRefJson = (filePath: string, defaultVal: any = null) => {
+    try {
+      if (fs.existsSync(filePath)) {
+        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      }
+    } catch (_) {}
+    return defaultVal;
+  };
+  const writeRefJson = (filePath: string, data: any) => {
+    try {
+      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const refDataTypes = [
+    { type: 'contacts', getPath: () => getRefDataFile('contacts.json'), defaultVal: [] },
+    { type: 'notes', getPath: () => getRefDataFile('notes.json'), defaultVal: [] },
+    { type: 'tasks', getPath: () => getRefDataFile('tasks.json'), defaultVal: [] },
+    { type: 'dashboard-settings', getPath: () => getRefDataFile('dashboard_settings.json'), defaultVal: [] },
+    { type: 'history-settings', getPath: () => getRefDataFile('history_settings.json'), defaultVal: { maxContextMessages: 20, storeHistory: true } },
+    { type: 'thinking-settings', getPath: () => getRefDataFile('thinking_settings.json'), defaultVal: [] },
+    { type: 'gemini-preference', getPath: () => getRefDataFile('gemini_preference.json'), defaultVal: [] },
+    { type: 'folder-config', getPath: () => getRefDataFile('imported_folders.json'), defaultVal: [] },
+  ];
+
+  refDataTypes.forEach(({ type, getPath, defaultVal }) => {
+    ipcMain.handle(`load-${type}`, async () => {
+      return readRefJson(getPath(), defaultVal);
+    });
+    ipcMain.handle(`save-${type}`, async (_event, data: any) => {
+      return writeRefJson(getPath(), data);
+    });
   });
 
   ipcMain.handle('onboarding-get-data', () => {

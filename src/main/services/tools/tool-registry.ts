@@ -40,6 +40,13 @@ export class ToolRegistry {
     this.register({
       name: 'web_search',
       description: 'Search the web for up-to-date information, news, and market updates.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          query: { type: 'STRING', description: 'Search query string' },
+        },
+        required: ['query'],
+      },
       execute: async ({ query }: { query?: string }) => {
         if (!query) throw new Error('Query parameter is required');
         const cleanQuery = query.trim();
@@ -209,9 +216,18 @@ export class ToolRegistry {
     this.register({
       name: 'store_memory',
       description: 'Save an important user fact or preference into durable long-term memory.',
-      execute: async ({ fact, category }: any) => {
-        const success = this.memoryService.appendMemoryFact(category || 'General', fact);
-        return { success, fact };
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          content: { type: 'STRING', description: 'Fact or memory content to store' },
+          category: { type: 'STRING', description: 'Category: personal, project, fact, or preference' },
+        },
+        required: ['content', 'category'],
+      },
+      execute: async ({ fact, content, category }: any) => {
+        const memContent = content || fact;
+        const success = this.memoryService.appendMemoryFact(category || 'General', memContent);
+        return { success, fact: memContent };
       },
     });
 
@@ -219,8 +235,18 @@ export class ToolRegistry {
     this.register({
       name: 'query_memory',
       description: 'Retrieve memories and user facts from ~/.hermes/memories/MEMORY.md.',
-      execute: async () => {
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          topic: { type: 'STRING', description: 'Optional search keyword or topic' },
+        },
+      },
+      execute: async ({ topic }: any = {}) => {
         const content = this.memoryService.readRawMemory();
+        if (topic) {
+          const lines = content.split('\n').filter(l => l.toLowerCase().includes(String(topic).toLowerCase()));
+          return { content: lines.join('\n') || content };
+        }
         return { content };
       },
     });
@@ -458,15 +484,17 @@ export class ToolRegistry {
     // 11. os_exec
     this.register({
       name: 'os_exec',
-      description: 'Execute a validated terminal command safely.',
+      description: "Execute a shell command on the user's PC/Mac. Most powerful OS tool for system tasks, scripts, and package management.",
       parameters: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          command: { type: 'string', description: 'Terminal command to execute' },
+          command: { type: 'STRING', description: 'Terminal command to execute' },
+          workingDir: { type: 'STRING', description: 'Optional working directory path' },
+          timeout: { type: 'NUMBER', description: 'Execution timeout in ms (default 30000, max 300000)' },
         },
         required: ['command'],
       },
-      execute: async ({ command }: any) => {
+      execute: async ({ command, workingDir, timeout }: any) => {
         if (!command) throw new Error('Command required');
         // Safety guard against destructive commands
         const dangerousPatterns = [/rm\s+-rf\s+\//i, /format\s+[a-z]:/i, /del\s+\/s\s+\/q\s+c:\\/i];
@@ -475,13 +503,54 @@ export class ToolRegistry {
             throw new Error(`Command blocked by safety guard: ${command}`);
           }
         }
+        const execTimeout = Math.min(300000, Math.max(1000, Number(timeout) || 30000));
+        const cwd = workingDir && fs.existsSync(workingDir) ? path.resolve(workingDir) : undefined;
+
         return new Promise((resolve) => {
-          exec(command, { timeout: 15000 }, (error, stdout, stderr) => {
+          exec(command, { timeout: execTimeout, cwd }, (error, stdout, stderr) => {
+            const outStr = stdout || '';
+            const errStr = stderr || (error ? error.message : '');
             resolve({
+              success: !error,
               exitCode: error ? error.code || 1 : 0,
-              stdout: stdout || '',
-              stderr: stderr || (error ? error.message : ''),
+              stdout: outStr,
+              stderr: errStr,
+              result: outStr || errStr || (error ? `Failed with exit code ${error.code}` : 'Command executed successfully'),
             });
+          });
+        });
+      },
+    });
+
+    // 11-proc. os_process
+    this.register({
+      name: 'os_process',
+      description: 'List running processes or kill a process by PID.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          action: { type: 'STRING', description: 'Action to perform: "list" or "kill"' },
+          pid: { type: 'NUMBER', description: 'Process ID to kill (required if action is "kill")' },
+        },
+        required: ['action'],
+      },
+      execute: async ({ action, pid }: any) => {
+        if (action === 'kill') {
+          if (!pid) throw new Error('pid is required for action "kill"');
+          try {
+            process.kill(Number(pid));
+            return { success: true, result: `Killed process ${pid}` };
+          } catch (err: any) {
+            return { success: false, error: err.message };
+          }
+        }
+        return new Promise((resolve) => {
+          const cmd = process.platform === 'win32'
+            ? 'tasklist /FO CSV /NH'
+            : 'ps -eo pid,comm --sort=-%mem';
+          exec(cmd, { timeout: 10000 }, (err, stdout) => {
+            if (err) return resolve({ success: false, error: err.message });
+            resolve({ success: true, result: stdout.slice(0, 50000) });
           });
         });
       },
@@ -615,38 +684,69 @@ export class ToolRegistry {
     // 12. fs_read
     this.register({
       name: 'fs_read',
-      description: 'Read the contents of a local file safely.',
+      description: "Read a file's content or list directory contents. Supports line offset/limit pagination.",
       parameters: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          file_path: { type: 'string', description: 'Path to file to read' },
+          path: { type: 'STRING', description: 'Path to file or directory to read' },
+          offset: { type: 'NUMBER', description: 'Starting line number (1-indexed)' },
+          limit: { type: 'NUMBER', description: 'Number of lines to read' },
         },
-        required: ['file_path'],
+        required: ['path'],
       },
-      execute: async ({ file_path }: any) => {
-        if (!file_path) throw new Error('file_path required');
-        const resolved = path.resolve(file_path);
-        if (!fs.existsSync(resolved)) throw new Error(`File does not exist: ${resolved}`);
+      execute: async ({ path: targetPath, file_path, offset, limit }: any) => {
+        const p = targetPath || file_path;
+        if (!p) throw new Error('path parameter required');
+        const resolved = path.resolve(p);
+        if (!fs.existsSync(resolved)) throw new Error(`Path does not exist: ${resolved}`);
+        const stat = fs.statSync(resolved);
+        if (stat.isDirectory()) {
+          const entries = fs.readdirSync(resolved, { withFileTypes: true });
+          const items = entries.map((e) => `${e.isDirectory() ? '[DIR]' : '[FILE]'} ${e.name}`).join('\n');
+          return {
+            path: resolved,
+            isDirectory: true,
+            totalItems: entries.length,
+            content: items,
+          };
+        }
         const data = fs.readFileSync(resolved, 'utf-8');
-        return { content: data.slice(0, 100000) };
+        const lines = data.split(/\r?\n/);
+        const start = offset ? Math.max(0, Number(offset) - 1) : 0;
+        const count = limit ? Number(limit) : lines.length;
+        const sliced = lines.slice(start, start + count);
+        const numbered = sliced.map((l, i) => `${start + i + 1}: ${l}`).join('\n');
+        return {
+          path: resolved,
+          totalLines: lines.length,
+          offset: start + 1,
+          limit: count,
+          content: numbered.slice(0, 200000),
+        };
       },
     });
 
     // 13. fs_write
     this.register({
       name: 'fs_write',
-      description: 'Write content to a local file safely.',
+      description: 'Write content to a file (creates if not exists, overwrites) or create a directory.',
       parameters: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          file_path: { type: 'string', description: 'Destination file path' },
-          content: { type: 'string', description: 'File content to write' },
+          path: { type: 'STRING', description: 'Destination file or folder path' },
+          content: { type: 'STRING', description: 'File content to write' },
+          isDirectory: { type: 'BOOLEAN', description: 'Set true to create directory instead of file' },
         },
-        required: ['file_path', 'content'],
+        required: ['path'],
       },
-      execute: async ({ file_path, content }: any) => {
-        if (!file_path) throw new Error('file_path required');
-        const resolved = path.resolve(file_path);
+      execute: async ({ path: targetPath, file_path, content, isDirectory }: any) => {
+        const p = targetPath || file_path;
+        if (!p) throw new Error('path required');
+        const resolved = path.resolve(p);
+        if (isDirectory) {
+          if (!fs.existsSync(resolved)) fs.mkdirSync(resolved, { recursive: true });
+          return { success: true, path: resolved, isDirectory: true };
+        }
         const dir = path.dirname(resolved);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(resolved, content || '', 'utf-8');
@@ -719,6 +819,10 @@ export class ToolRegistry {
     this.register({
       name: 'clipboard_read',
       description: 'Read current text from system clipboard.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
       execute: async () => {
         return { text: clipboard.readText() };
       },
@@ -727,6 +831,13 @@ export class ToolRegistry {
     this.register({
       name: 'clipboard_write',
       description: 'Copy text to system clipboard.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          text: { type: 'STRING', description: 'Text to copy to system clipboard.' },
+        },
+        required: ['text'],
+      },
       execute: async ({ text }: any) => {
         clipboard.writeText(text || '');
         return { success: true };
@@ -737,6 +848,14 @@ export class ToolRegistry {
     this.register({
       name: 'send_notification',
       description: 'Send a desktop notification to the user.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          title: { type: 'STRING', description: 'Notification title' },
+          body: { type: 'STRING', description: 'Notification body message' },
+        },
+        required: ['title', 'body'],
+      },
       execute: async ({ title, body }: any) => {
         new Notification({
           title: title || 'Akki AI Notification',
@@ -751,6 +870,15 @@ export class ToolRegistry {
     this.register({
       name: 'generate_diagram',
       description: 'Generate a Mermaid diagram for the Visual Hub.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          mermaid_code: { type: 'STRING', description: 'Mermaid diagram syntax code' },
+          diagram_type: { type: 'STRING', description: 'Diagram type, e.g. flowchart, sequence, class' },
+          title: { type: 'STRING', description: 'Diagram title' },
+        },
+        required: ['mermaid_code'],
+      },
       execute: async ({ title, mermaid_code }: any) => {
         return {
           title: title || 'System Flowchart',
@@ -765,6 +893,10 @@ export class ToolRegistry {
     this.register({
       name: 'arduino_list_ports',
       description: 'List connected serial COM ports and detect physical Arduino hardware.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
       execute: async () => {
         return await hardwareService.listPorts();
       },
@@ -774,6 +906,13 @@ export class ToolRegistry {
     this.register({
       name: 'arduino_connect',
       description: 'Connect to an Arduino microcontroller board on a specific COM port.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          port: { type: 'STRING', description: 'Serial COM port (e.g. COM3 or /dev/ttyUSB0)' },
+        },
+        required: ['port'],
+      },
       execute: async ({ port }: { port?: string }) => {
         if (!port) throw new Error('Port parameter required (e.g. COM3)');
         return await hardwareService.connect(port);
@@ -784,14 +923,38 @@ export class ToolRegistry {
     this.register({
       name: 'arduino_disconnect',
       description: 'Disconnect from the currently connected Arduino board.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
       execute: async () => {
         return hardwareService.disconnect();
       },
     });
 
     this.register({
+      name: 'arduino_board_status',
+      description: 'Query firmware version and pin capabilities of connected board.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        return await hardwareService.getBoardStatus();
+      },
+    });
+
+    this.register({
       name: 'arduino_digital_write',
       description: 'Write digital HIGH/LOW to Arduino pin.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Digital pin number' },
+          value: { type: 'NUMBER', description: 'Pin value: 1 for HIGH, 0 for LOW' },
+        },
+        required: ['pin', 'value'],
+      },
       execute: async ({ pin, value }: { pin?: number; value?: number }) => {
         if (pin === undefined || value === undefined) throw new Error('Pin and value required');
         return await hardwareService.digitalWrite(pin, value);
@@ -799,8 +962,31 @@ export class ToolRegistry {
     });
 
     this.register({
+      name: 'arduino_digital_read',
+      description: 'Read digital pin state.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Digital pin number' },
+        },
+        required: ['pin'],
+      },
+      execute: async ({ pin }: { pin?: number }) => {
+        if (pin === undefined) throw new Error('Pin required');
+        return await hardwareService.digitalRead(pin);
+      },
+    });
+
+    this.register({
       name: 'arduino_analog_read',
       description: 'Read analog value from Arduino pin.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Analog pin number (e.g. 0 for A0)' },
+        },
+        required: ['pin'],
+      },
       execute: async ({ pin }: { pin?: number }) => {
         if (pin === undefined) throw new Error('Pin required');
         return await hardwareService.analogRead(pin);
@@ -808,11 +994,86 @@ export class ToolRegistry {
     });
 
     this.register({
+      name: 'arduino_analog_write',
+      description: 'Output PWM signal to pin for LED dimming / motor speed.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'PWM capable pin number' },
+          value: { type: 'NUMBER', description: 'PWM duty cycle value (0-255)' },
+        },
+        required: ['pin', 'value'],
+      },
+      execute: async ({ pin, value }: { pin?: number; value?: number }) => {
+        if (pin === undefined || value === undefined) throw new Error('Pin and value required');
+        return await hardwareService.analogWrite(pin, value);
+      },
+    });
+
+    this.register({
+      name: 'arduino_set_pin_mode',
+      description: 'Configure pin mode (INPUT, OUTPUT, ANALOG, PWM, SERVO).',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Pin number' },
+          mode: { type: 'STRING', description: 'Pin mode: INPUT, OUTPUT, ANALOG, PWM, SERVO' },
+        },
+        required: ['pin', 'mode'],
+      },
+      execute: async ({ pin, mode }: { pin?: number; mode?: string }) => {
+        if (pin === undefined || !mode) throw new Error('Pin and mode required');
+        return await hardwareService.setPinMode(pin, mode);
+      },
+    });
+
+    this.register({
       name: 'arduino_servo_write',
       description: 'Write angle to servo on Arduino pin.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Servo pin number' },
+          angle: { type: 'NUMBER', description: 'Servo angle in degrees (0-180)' },
+        },
+        required: ['pin', 'angle'],
+      },
       execute: async ({ pin, angle }: { pin?: number; angle?: number }) => {
         if (pin === undefined || angle === undefined) throw new Error('Pin and angle required');
         return await hardwareService.servoWrite(pin, angle);
+      },
+    });
+
+    this.register({
+      name: 'arduino_led_blink',
+      description: 'Blink LED continuously at specified millisecond interval.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Digital pin number' },
+          intervalMs: { type: 'NUMBER', description: 'Blink interval in ms (default 500)' },
+        },
+        required: ['pin'],
+      },
+      execute: async ({ pin, intervalMs }: { pin?: number; intervalMs?: number }) => {
+        if (pin === undefined) throw new Error('Pin required');
+        return await hardwareService.ledBlink(pin, intervalMs || 500);
+      },
+    });
+
+    this.register({
+      name: 'arduino_led_stop',
+      description: 'Stop ongoing LED blink pattern on pin.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          pin: { type: 'NUMBER', description: 'Digital pin number' },
+        },
+        required: ['pin'],
+      },
+      execute: async ({ pin }: { pin?: number }) => {
+        if (pin === undefined) throw new Error('Pin required');
+        return await hardwareService.ledStop(pin);
       },
     });
 
@@ -878,11 +1139,25 @@ export class ToolRegistry {
     this.register({
       name: 'generate_image',
       description: 'Generate an AI image and render it in the Visual Hub overlay.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          prompt: { type: 'STRING', description: 'Detailed prompt describing the image to generate' },
+        },
+        required: ['prompt'],
+      },
       execute: generateImageHandler,
     });
     this.register({
       name: 'huggingface_generate_image',
       description: 'Generate an AI image using Hugging Face (or direct rendering).',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          prompt: { type: 'STRING', description: 'Image generation prompt' },
+        },
+        required: ['prompt'],
+      },
       execute: generateImageHandler,
     });
 
@@ -890,6 +1165,13 @@ export class ToolRegistry {
     this.register({
       name: 'browser_navigate',
       description: 'Navigate the headless browser to a URL.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          url: { type: 'STRING', description: 'Target URL to visit (e.g. https://google.com)' },
+        },
+        required: ['url'],
+      },
       execute: async ({ url }: Record<string, any>) => {
         const { browserManager } = require('./browser-manager');
         return await browserManager.navigate(url);
@@ -900,6 +1182,13 @@ export class ToolRegistry {
     this.register({
       name: 'browser_screenshot',
       description: 'Take a screenshot of the current page in the browser.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          fullPage: { type: 'BOOLEAN', description: 'Whether to capture the entire scrollable page' },
+          selector: { type: 'STRING', description: 'Optional CSS selector to capture' },
+        },
+      },
       execute: async () => {
         const { browserManager } = require('./browser-manager');
         return await browserManager.screenshot();
@@ -910,6 +1199,13 @@ export class ToolRegistry {
     this.register({
       name: 'browser_get_html',
       description: 'Get HTML content of the current page.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'Optional CSS selector' },
+          maxChars: { type: 'NUMBER', description: 'Maximum characters to return' },
+        },
+      },
       execute: async () => {
         const { browserManager } = require('./browser-manager');
         return await browserManager.extract();
@@ -920,6 +1216,17 @@ export class ToolRegistry {
     this.register({
       name: 'browser_click',
       description: 'Click on a CSS selector in the browser.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of the element to click' },
+          doubleClick: { type: 'BOOLEAN', description: 'Perform double click' },
+          button: { type: 'STRING', description: 'left, right, or middle button' },
+          modifiers: { type: 'ARRAY', description: 'Keyboard modifiers e.g. Shift, Control' },
+          delayMs: { type: 'NUMBER', description: 'Delay before click in ms' },
+        },
+        required: ['selector'],
+      },
       execute: async ({ selector }: Record<string, any>) => {
         const { browserManager } = require('./browser-manager');
         return await browserManager.click(selector);
@@ -930,9 +1237,21 @@ export class ToolRegistry {
     this.register({
       name: 'browser_type',
       description: 'Type or fill value into a CSS selector.',
-      execute: async ({ selector, value }: Record<string, any>) => {
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of input or contenteditable element' },
+          text: { type: 'STRING', description: 'Text to type' },
+          value: { type: 'STRING', description: 'Alias for text' },
+          clearFirst: { type: 'BOOLEAN', description: 'Clear existing text before typing' },
+          slowly: { type: 'BOOLEAN', description: 'Type with human-like delay' },
+        },
+        required: ['selector'],
+      },
+      execute: async ({ selector, text, value }: Record<string, any>) => {
         const { browserManager } = require('./browser-manager');
-        return await browserManager.fill(selector, value);
+        const txt = text !== undefined ? text : value;
+        return await browserManager.fill(selector, txt || '');
       },
     });
 
@@ -940,17 +1259,26 @@ export class ToolRegistry {
     this.register({
       name: 'take_screenshot',
       description: 'Capture screenshot of the desktop screen.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
       execute: async () => {
         try {
           const { desktopCapturer } = require('electron');
           const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1920, height: 1080 } });
           if (sources.length > 0) {
             const dataUrl = sources[0].thumbnail.toDataURL();
+            const base64Data = dataUrl.replace(/^data:image\/[a-z]+;base64,/, '');
             return {
               success: true,
               dataUrl,
               sourceName: sources[0].name,
               timestamp: new Date().toISOString(),
+              _screenshotForVision: {
+                data: base64Data,
+                mimeType: 'image/jpeg',
+              },
             };
           }
           return { success: false, error: 'No screen sources found' };
@@ -965,28 +1293,35 @@ export class ToolRegistry {
       name: 'fs_edit',
       description: 'Edit a file by finding a specific text chunk and replacing it.',
       parameters: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          path: { type: 'string', description: 'Target file path' },
-          target_content: { type: 'string', description: 'Exact string to be replaced' },
-          replacement_content: { type: 'string', description: 'Replacement string' },
-          allow_multiple: { type: 'boolean', description: 'Replace all occurrences if true' },
+          path: { type: 'STRING', description: 'Target file path' },
+          old_text: { type: 'STRING', description: 'Exact string to be replaced in file' },
+          new_text: { type: 'STRING', description: 'Replacement string' },
+          target_content: { type: 'STRING', description: 'Alias for old_text' },
+          replacement_content: { type: 'STRING', description: 'Alias for new_text' },
+          allow_multiple: { type: 'BOOLEAN', description: 'Replace all occurrences if true' },
         },
-        required: ['path', 'target_content', 'replacement_content'],
+        required: ['path'],
       },
-      execute: async ({ path: targetPath, target_content, replacement_content, allow_multiple }: Record<string, any>) => {
+      execute: async ({ path: targetPath, old_text, new_text, target_content, replacement_content, allow_multiple }: Record<string, any>) => {
         if (!targetPath) throw new Error('Path is required');
         const resolved = path.resolve(targetPath);
         if (!fs.existsSync(resolved)) throw new Error(`File does not exist: ${resolved}`);
         const content = fs.readFileSync(resolved, 'utf-8');
-        if (!content.includes(target_content)) {
+        const target = old_text !== undefined ? old_text : target_content;
+        const replacement = new_text !== undefined ? new_text : replacement_content;
+        if (target === undefined || replacement === undefined) {
+          throw new Error('Both old_text and new_text are required');
+        }
+        if (!content.includes(target)) {
           throw new Error('Target content not found in file');
         }
         let updated: string;
         if (allow_multiple) {
-          updated = content.split(target_content).join(replacement_content);
+          updated = content.split(target).join(replacement);
         } else {
-          updated = content.replace(target_content, replacement_content);
+          updated = content.replace(target, replacement);
         }
         fs.writeFileSync(resolved, updated, 'utf-8');
         return { success: true, path: resolved, bytesWritten: Buffer.byteLength(updated) };
@@ -998,17 +1333,19 @@ export class ToolRegistry {
       name: 'manage_notes',
       description: 'Create, read, update, list, or delete notes in local storage.',
       parameters: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          action: { type: 'string', description: 'create | list | read | update | delete' },
-          id: { type: 'string', description: 'Note ID' },
-          title: { type: 'string', description: 'Note title' },
-          content: { type: 'string', description: 'Note content' },
-          category: { type: 'string', description: 'Note category' },
+          action: { type: 'STRING', description: 'create | list | read | read_all | update | delete' },
+          id: { type: 'STRING', description: 'Note ID' },
+          ids: { type: 'ARRAY', description: 'Array of note IDs for bulk delete' },
+          title: { type: 'STRING', description: 'Note title' },
+          content: { type: 'STRING', description: 'Note content' },
+          category: { type: 'STRING', description: 'Note category' },
+          notes: { type: 'ARRAY', description: 'Array of note objects for bulk creation' },
         },
         required: ['action'],
       },
-      execute: async ({ action, id, title, content, category }: Record<string, any>) => {
+      execute: async ({ action, id, ids, title, content, category, notes: bulkNotes }: Record<string, any>) => {
         const notesPath = path.join(app.getPath('userData'), 'notes.json');
         let notes: any[] = [];
         if (fs.existsSync(notesPath)) {
@@ -1018,6 +1355,7 @@ export class ToolRegistry {
 
         switch (action) {
           case 'list':
+          case 'read_all':
             return { success: true, notes };
           case 'read': {
             const found = notes.find((n) => n.id === id);
@@ -1025,6 +1363,19 @@ export class ToolRegistry {
             return { success: true, note: found };
           }
           case 'create': {
+            if (Array.isArray(bulkNotes) && bulkNotes.length > 0) {
+              const created = bulkNotes.map((n: any) => ({
+                id: n.id || `note-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                title: n.title || 'Untitled Note',
+                content: n.content || '',
+                category: n.category || 'General',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }));
+              notes.unshift(...created);
+              fs.writeFileSync(notesPath, JSON.stringify(notes, null, 2), 'utf8');
+              return { success: true, count: created.length, notes: created };
+            }
             const newNote = {
               id: id || `note-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
               title: title || 'Untitled Note',
@@ -1048,6 +1399,12 @@ export class ToolRegistry {
             return { success: true, note: notes[idx] };
           }
           case 'delete': {
+            if (Array.isArray(ids) && ids.length > 0) {
+              const set = new Set(ids);
+              const filtered = notes.filter((n) => !set.has(n.id));
+              fs.writeFileSync(notesPath, JSON.stringify(filtered, null, 2), 'utf8');
+              return { success: true, deletedCount: notes.length - filtered.length, deletedIds: ids };
+            }
             const filtered = notes.filter((n) => n.id !== id);
             fs.writeFileSync(notesPath, JSON.stringify(filtered, null, 2), 'utf8');
             return { success: true, deleted: id };
@@ -1063,18 +1420,22 @@ export class ToolRegistry {
       name: 'manage_tasks',
       description: 'Create, update, list, or delete tasks in local storage.',
       parameters: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          action: { type: 'string', description: 'create | list | update | delete' },
-          id: { type: 'string', description: 'Task ID' },
-          title: { type: 'string', description: 'Task title' },
-          status: { type: 'string', description: 'pending | in_progress | completed | failed' },
-          priority: { type: 'string', description: 'low | medium | high' },
-          category: { type: 'string', description: 'Task category' },
+          action: { type: 'STRING', description: 'list | add | create | complete | incomplete | update | delete' },
+          id: { type: 'STRING', description: 'Task ID' },
+          ids: { type: 'ARRAY', description: 'Array of task IDs for bulk delete' },
+          text: { type: 'STRING', description: 'Task title or description text' },
+          title: { type: 'STRING', description: 'Alias for text' },
+          texts: { type: 'ARRAY', description: 'Array of task titles for bulk add' },
+          tasks: { type: 'ARRAY', description: 'Array of task objects for bulk add' },
+          status: { type: 'STRING', description: 'pending | in_progress | completed | failed' },
+          priority: { type: 'STRING', description: 'low | medium | high' },
+          category: { type: 'STRING', description: 'Task category' },
         },
         required: ['action'],
       },
-      execute: async ({ action, id, title, status, priority, category }: Record<string, any>) => {
+      execute: async ({ action, id, ids, text, title, texts, tasks: bulkTasks, status, priority, category }: Record<string, any>) => {
         const tasksPath = path.join(app.getPath('userData'), 'tasks.json');
         let tasks: any[] = [];
         if (fs.existsSync(tasksPath)) {
@@ -1085,10 +1446,40 @@ export class ToolRegistry {
         switch (action) {
           case 'list':
             return { success: true, tasks };
+          case 'add':
           case 'create': {
+            if (Array.isArray(texts) && texts.length > 0) {
+              const added = texts.map((t: string) => ({
+                id: `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                title: t,
+                status: 'pending',
+                priority: priority || 'medium',
+                category: category || 'General',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }));
+              tasks.unshift(...added);
+              fs.writeFileSync(tasksPath, JSON.stringify(tasks, null, 2), 'utf8');
+              return { success: true, count: added.length, tasks: added };
+            }
+            if (Array.isArray(bulkTasks) && bulkTasks.length > 0) {
+              const added = bulkTasks.map((t: any) => ({
+                id: t.id || `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                title: t.title || t.text || 'New Task',
+                status: t.status || 'pending',
+                priority: t.priority || 'medium',
+                category: t.category || 'General',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }));
+              tasks.unshift(...added);
+              fs.writeFileSync(tasksPath, JSON.stringify(tasks, null, 2), 'utf8');
+              return { success: true, count: added.length, tasks: added };
+            }
+            const taskTitle = text !== undefined ? text : (title || 'New Task');
             const newTask = {
               id: id || `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              title: title || 'New Task',
+              title: taskTitle,
               status: status || 'pending',
               priority: priority || 'medium',
               category: category || 'General',
@@ -1099,9 +1490,26 @@ export class ToolRegistry {
             fs.writeFileSync(tasksPath, JSON.stringify(tasks, null, 2), 'utf8');
             return { success: true, task: newTask };
           }
+          case 'complete': {
+            const idx = tasks.findIndex((t) => t.id === id);
+            if (idx === -1) throw new Error(`Task not found: ${id}`);
+            tasks[idx].status = 'completed';
+            tasks[idx].updatedAt = new Date().toISOString();
+            fs.writeFileSync(tasksPath, JSON.stringify(tasks, null, 2), 'utf8');
+            return { success: true, task: tasks[idx] };
+          }
+          case 'incomplete': {
+            const idx = tasks.findIndex((t) => t.id === id);
+            if (idx === -1) throw new Error(`Task not found: ${id}`);
+            tasks[idx].status = 'pending';
+            tasks[idx].updatedAt = new Date().toISOString();
+            fs.writeFileSync(tasksPath, JSON.stringify(tasks, null, 2), 'utf8');
+            return { success: true, task: tasks[idx] };
+          }
           case 'update': {
             const idx = tasks.findIndex((t) => t.id === id);
             if (idx === -1) throw new Error(`Task not found: ${id}`);
+            if (text !== undefined) tasks[idx].title = text;
             if (title !== undefined) tasks[idx].title = title;
             if (status !== undefined) tasks[idx].status = status;
             if (priority !== undefined) tasks[idx].priority = priority;
@@ -1111,6 +1519,12 @@ export class ToolRegistry {
             return { success: true, task: tasks[idx] };
           }
           case 'delete': {
+            if (Array.isArray(ids) && ids.length > 0) {
+              const set = new Set(ids);
+              const filtered = tasks.filter((t) => !set.has(t.id));
+              fs.writeFileSync(tasksPath, JSON.stringify(filtered, null, 2), 'utf8');
+              return { success: true, deletedCount: tasks.length - filtered.length, deletedIds: ids };
+            }
             const filtered = tasks.filter((t) => t.id !== id);
             fs.writeFileSync(tasksPath, JSON.stringify(filtered, null, 2), 'utf8');
             return { success: true, deleted: id };
@@ -1125,6 +1539,12 @@ export class ToolRegistry {
     this.register({
       name: 'browser_snapshot',
       description: 'Get page snapshot including title, URL, and visible text content.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          includeScreenshot: { type: 'BOOLEAN', description: 'Whether to include screenshot data' },
+        },
+      },
       execute: async () => {
         const { browserManager } = require('./browser-manager');
         const p = await browserManager.getPage();
@@ -1139,6 +1559,14 @@ export class ToolRegistry {
     this.register({
       name: 'browser_wait',
       description: 'Wait for a specified selector or timeout in ms in the browser.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector to wait for' },
+          timeoutMs: { type: 'NUMBER', description: 'Timeout in milliseconds' },
+          state: { type: 'STRING', description: 'Wait state: visible, attached, hidden' },
+        },
+      },
       execute: async ({ selector, timeoutMs }: Record<string, any> = {}) => {
         const { browserManager } = require('./browser-manager');
         const p = await browserManager.getPage();
@@ -1155,11 +1583,577 @@ export class ToolRegistry {
     this.register({
       name: 'browser_execute_script',
       description: 'Execute JavaScript code in the browser and return the result.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          script: { type: 'STRING', description: 'JavaScript code to execute in page context' },
+        },
+        required: ['script'],
+      },
       execute: async ({ script }: Record<string, any>) => {
         const { browserManager } = require('./browser-manager');
         const p = await browserManager.getPage();
         const result = await p.evaluate((code: string) => eval(code), script);
         return { success: true, result };
+      },
+    });
+
+    this.register({
+      name: 'browser_go_forward',
+      description: 'Navigate forward in browser history.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.goForward({ waitUntil: 'domcontentloaded', timeout: 10000 });
+        return { success: true, result: 'Navigated forward in browser history.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_reload',
+      description: 'Reload the current browser page.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          ignoreCache: { type: 'BOOLEAN', description: 'Bypass browser cache' },
+        },
+      },
+      execute: async () => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.reload({ waitUntil: 'domcontentloaded' });
+        return { success: true, result: 'Page reloaded.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_close',
+      description: 'Close the browser window and terminate instance.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        const { browserManager } = require('./browser-manager');
+        await browserManager.close();
+        return { success: true, result: 'Browser closed.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_scroll',
+      description: 'Scroll page in specified direction.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          direction: { type: 'STRING', description: 'up | down | top | bottom' },
+          amount: { type: 'NUMBER', description: 'Pixels to scroll' },
+        },
+        required: ['direction'],
+      },
+      execute: async ({ direction, amount }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        if (direction === 'bottom') await p.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+        else if (direction === 'top') await p.evaluate(() => window.scrollTo(0, 0));
+        else if (direction === 'up') await p.evaluate((amt: number) => window.scrollBy(0, -(amt || 500)), amount || 500);
+        else await p.evaluate((amt: number) => window.scrollBy(0, amt || 500), amount || 500);
+        return { success: true, result: `Scrolled ${direction}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_scroll_into_view',
+      description: 'Scroll an element into view.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of the element' },
+        },
+        required: ['selector'],
+      },
+      execute: async ({ selector }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.locator(selector).scrollIntoViewIfNeeded({ timeout: 10000 });
+        return { success: true, result: `Scrolled ${selector} into view.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_select',
+      description: 'Select option in a dropdown by value or label.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of the select element' },
+          value: { type: 'STRING', description: 'Value or label of the option to select' },
+        },
+        required: ['selector', 'value'],
+      },
+      execute: async ({ selector, value }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.selectOption(selector, value);
+        return { success: true, result: `Selected ${value} on ${selector}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_highlight',
+      description: 'Highlight an element with a colored border outline.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of the element' },
+        },
+        required: ['selector'],
+      },
+      execute: async ({ selector }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.evaluate((sel: string) => {
+          const el = document.querySelector(sel);
+          if (el) (el as HTMLElement).style.outline = '3px solid #00f0ff';
+        }, selector);
+        return { success: true, result: `Highlighted element ${selector}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_query_selector',
+      description: 'Query DOM elements matching CSS selector with bounding boxes.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector to query' },
+        },
+        required: ['selector'],
+      },
+      execute: async ({ selector }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        const items = await p.evaluate((sel: string) => {
+          return Array.from(document.querySelectorAll(sel)).slice(0, 50).map((el, i) => ({
+            index: i,
+            tagName: el.tagName.toLowerCase(),
+            text: el.textContent?.trim().slice(0, 200),
+            href: (el as HTMLAnchorElement).href || undefined,
+          }));
+        }, selector);
+        return { success: true, result: `Found ${items.length} elements`, count: items.length, elements: items };
+      },
+    });
+
+    this.register({
+      name: 'browser_fill_form',
+      description: 'Fill multiple form fields simultaneously.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          fields: { type: 'OBJECT', description: 'Map of CSS selectors to values to fill' },
+        },
+        required: ['fields'],
+      },
+      execute: async ({ fields }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        for (const [sel, val] of Object.entries(fields || {})) {
+          await p.fill(sel, String(val));
+        }
+        return { success: true, result: 'Form fields filled.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_new_tab',
+      description: 'Open a new browser tab with optional URL.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          url: { type: 'STRING', description: 'Optional URL to open in new tab' },
+        },
+      },
+      execute: async ({ url }: any = {}) => {
+        const { browserManager } = require('./browser-manager');
+        if (!browserManager['context']) await browserManager.launch();
+        const p = await browserManager['context']!.newPage();
+        browserManager['activePage'] = p;
+        if (url) await p.goto(url.startsWith('http') ? url : `https://${url}`);
+        return { success: true, result: `Opened new tab${url ? ` at ${url}` : ''}` };
+      },
+    });
+
+    this.register({
+      name: 'browser_switch_tab',
+      description: 'Switch active tab to a specific index.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          index: { type: 'NUMBER', description: 'Tab index to switch to' },
+        },
+        required: ['index'],
+      },
+      execute: async ({ index }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const pages = browserManager['context']?.pages() || [];
+        const idx = Number(index);
+        if (pages[idx]) {
+          browserManager['activePage'] = pages[idx];
+          await pages[idx].bringToFront();
+          return { success: true, result: `Switched to tab ${idx}` };
+        }
+        throw new Error(`Tab index ${idx} out of range (${pages.length} tabs open)`);
+      },
+    });
+
+    this.register({
+      name: 'browser_close_tab',
+      description: 'Close a specific browser tab by index.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          index: { type: 'NUMBER', description: 'Tab index to close' },
+        },
+        required: ['index'],
+      },
+      execute: async ({ index }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const pages = browserManager['context']?.pages() || [];
+        const idx = Number(index);
+        if (pages[idx]) {
+          await pages[idx].close();
+          return { success: true, result: `Closed tab ${idx}` };
+        }
+        throw new Error(`Tab index ${idx} out of range`);
+      },
+    });
+
+    this.register({
+      name: 'browser_get_cookies',
+      description: 'Retrieve cookies for current page.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          urls: { type: 'ARRAY', description: 'Optional list of URLs to filter cookies for' },
+        },
+      },
+      execute: async ({ urls }: any = {}) => {
+        const { browserManager } = require('./browser-manager');
+        if (!browserManager['context']) await browserManager.launch();
+        const cookies = await browserManager['context']!.cookies(urls);
+        return { success: true, cookies };
+      },
+    });
+
+    this.register({
+      name: 'browser_set_cookie',
+      description: 'Inject a cookie into browser session.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          name: { type: 'STRING', description: 'Cookie name' },
+          value: { type: 'STRING', description: 'Cookie value' },
+          domain: { type: 'STRING', description: 'Cookie domain' },
+          path: { type: 'STRING', description: 'Cookie path' },
+        },
+        required: ['name', 'value'],
+      },
+      execute: async ({ name, value, domain, path: cookiePath }: any) => {
+        const { browserManager } = require('./browser-manager');
+        if (!browserManager['context']) await browserManager.launch();
+        await browserManager['context']!.addCookies([{ name, value, domain: domain || 'localhost', path: cookiePath || '/' }]);
+        return { success: true, result: `Cookie ${name} set.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_clear_cookies',
+      description: 'Clear all browser cookies for current context.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        const { browserManager } = require('./browser-manager');
+        if (browserManager['context']) await browserManager['context'].clearCookies();
+        return { success: true, result: 'Cookies cleared.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_get_storage',
+      description: 'Read localStorage or sessionStorage items.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING', description: 'local | session' },
+          key: { type: 'STRING', description: 'Specific key to read, or omit to read all' },
+        },
+      },
+      execute: async ({ type, key }: any = {}) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        const res = await p.evaluate(({ t, k }: any) => {
+          const storage = t === 'session' ? sessionStorage : localStorage;
+          return k ? storage.getItem(k) : { ...storage };
+        }, { t: type, k: key });
+        return { success: true, data: res };
+      },
+    });
+
+    this.register({
+      name: 'browser_set_storage',
+      description: 'Set item in localStorage or sessionStorage.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING', description: 'local | session' },
+          key: { type: 'STRING', description: 'Storage key' },
+          value: { type: 'STRING', description: 'Storage value' },
+        },
+        required: ['type', 'key', 'value'],
+      },
+      execute: async ({ type, key, value }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.evaluate(({ t, k, v }: any) => {
+          const storage = t === 'session' ? sessionStorage : localStorage;
+          storage.setItem(k, v);
+        }, { t: type, k: key, v: value });
+        return { success: true, result: `Storage item ${key} set.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_clear_storage',
+      description: 'Clear browser web storage.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          type: { type: 'STRING', description: 'local | session | all' },
+        },
+      },
+      execute: async ({ type }: any = {}) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.evaluate((t: string) => {
+          if (t === 'session') sessionStorage.clear();
+          else if (t === 'local') localStorage.clear();
+          else {
+            localStorage.clear();
+            sessionStorage.clear();
+          }
+        }, type || 'all');
+        return { success: true, result: 'Storage cleared.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_resize_viewport',
+      description: 'Resize browser viewport dimensions.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          width: { type: 'NUMBER', description: 'Viewport width in px' },
+          height: { type: 'NUMBER', description: 'Viewport height in px' },
+        },
+        required: ['width', 'height'],
+      },
+      execute: async ({ width, height }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.setViewportSize({ width: Number(width) || 1280, height: Number(height) || 800 });
+        return { success: true, result: `Viewport resized to ${width}x${height}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_save_pdf',
+      description: 'Print current webpage to PDF file on disk.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          path: { type: 'STRING', description: 'Output file path (.pdf)' },
+          format: { type: 'STRING', description: 'Paper format, e.g. A4, Letter' },
+        },
+      },
+      execute: async ({ path: targetPath, format }: any = {}) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        const dest = targetPath || path.join(app.getPath('downloads'), `webpage-${Date.now()}.pdf`);
+        await p.pdf({ path: dest, format: (format as any) || 'A4' });
+        return { success: true, path: dest, result: `PDF saved to ${dest}` };
+      },
+    });
+
+    this.register({
+      name: 'browser_drag_drop',
+      description: 'Drag an element onto another element.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          sourceSelector: { type: 'STRING', description: 'CSS selector of source element' },
+          targetSelector: { type: 'STRING', description: 'CSS selector of target drop area' },
+        },
+        required: ['sourceSelector', 'targetSelector'],
+      },
+      execute: async ({ sourceSelector, targetSelector }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.dragAndDrop(sourceSelector, targetSelector);
+        return { success: true, result: `Dragged ${sourceSelector} to ${targetSelector}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_upload_file',
+      description: 'Upload files into file input element.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of the file input' },
+          filePaths: { type: 'ARRAY', description: 'Array of local file paths to upload' },
+        },
+        required: ['selector', 'filePaths'],
+      },
+      execute: async ({ selector, filePaths }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.setInputFiles(selector, filePaths);
+        return { success: true, result: `Uploaded files to ${selector}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_emulate_color_scheme',
+      description: 'Emulate light or dark color scheme preference.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          scheme: { type: 'STRING', description: 'light | dark' },
+        },
+        required: ['scheme'],
+      },
+      execute: async ({ scheme }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        await p.emulateMedia({ colorScheme: scheme === 'light' ? 'light' : 'dark' });
+        return { success: true, result: `Emulating ${scheme} color scheme.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_set_offline',
+      description: 'Toggle offline network simulation.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          offline: { type: 'BOOLEAN', description: 'Whether to simulate offline mode' },
+        },
+        required: ['offline'],
+      },
+      execute: async ({ offline }: any) => {
+        const { browserManager } = require('./browser-manager');
+        if (!browserManager['context']) await browserManager.launch();
+        await browserManager['context']!.setOffline(Boolean(offline));
+        return { success: true, result: `Offline mode set to ${offline}.` };
+      },
+    });
+
+    this.register({
+      name: 'browser_set_extra_headers',
+      description: 'Set custom HTTP request headers.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          headers: { type: 'OBJECT', description: 'Key-value map of HTTP headers' },
+        },
+        required: ['headers'],
+      },
+      execute: async ({ headers }: any) => {
+        const { browserManager } = require('./browser-manager');
+        if (!browserManager['context']) await browserManager.launch();
+        await browserManager['context']!.setExtraHTTPHeaders(headers || {});
+        return { success: true, result: 'Extra HTTP headers applied.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_set_http_credentials',
+      description: 'Provide HTTP Basic Authentication credentials.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          username: { type: 'STRING', description: 'Username' },
+          password: { type: 'STRING', description: 'Password' },
+        },
+        required: ['username', 'password'],
+      },
+      execute: async ({ username, password }: any) => {
+        const { browserManager } = require('./browser-manager');
+        if (!browserManager['context']) await browserManager.launch();
+        await browserManager['context']!.setHTTPCredentials({ username, password });
+        return { success: true, result: 'HTTP credentials set.' };
+      },
+    });
+
+    this.register({
+      name: 'browser_wait_download',
+      description: 'Wait for browser download to complete and return local file path.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          timeout: { type: 'NUMBER', description: 'Timeout in ms (default 30000)' },
+        },
+      },
+      execute: async ({ timeout }: any = {}) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        const download = await p.waitForEvent('download', { timeout: timeout || 30000 }).catch(() => null);
+        const savedPath = download ? await download.path() : null;
+        return { success: Boolean(savedPath), downloadedPath: savedPath };
+      },
+    });
+
+    this.register({
+      name: 'browser_download_by_click',
+      description: 'Click an element and wait for triggered file download.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {
+          selector: { type: 'STRING', description: 'CSS selector of the download button/link' },
+          timeout: { type: 'NUMBER', description: 'Timeout in ms (default 30000)' },
+        },
+        required: ['selector'],
+      },
+      execute: async ({ selector, timeout }: any) => {
+        const { browserManager } = require('./browser-manager');
+        const p = await browserManager.getPage();
+        const [download] = await Promise.all([
+          p.waitForEvent('download', { timeout: timeout || 30000 }).catch(() => null),
+          p.click(selector),
+        ]);
+        const savedPath = download ? await download.path() : null;
+        return { success: Boolean(savedPath), downloadedPath: savedPath };
+      },
+    });
+
+    this.register({
+      name: 'browser_get_errors',
+      description: 'Get uncaught exceptions and broken network requests.',
+      parameters: {
+        type: 'OBJECT',
+        properties: {},
+      },
+      execute: async () => {
+        const { browserManager } = require('./browser-manager');
+        const errors = (browserManager as any).consoleMessages?.filter((m: any) => m.level === 'error') || [];
+        return { success: true, errors };
       },
     });
 
@@ -1903,8 +2897,42 @@ export class ToolRegistry {
     }));
   }
 
+  private normalizeSchema(schema: any): any {
+    if (!schema || typeof schema !== 'object') return schema;
+    const cloned = Array.isArray(schema) ? [...schema] : { ...schema };
+    if (typeof cloned.type === 'string') {
+      cloned.type = cloned.type.toUpperCase();
+    }
+    if (cloned.properties && typeof cloned.properties === 'object') {
+      const normProps: Record<string, any> = {};
+      for (const [k, v] of Object.entries(cloned.properties)) {
+        normProps[k] = this.normalizeSchema(v);
+      }
+      cloned.properties = normProps;
+    }
+    if (cloned.items) {
+      cloned.items = this.normalizeSchema(cloned.items);
+    }
+    return cloned;
+  }
+
   public getToolDeclarations(): Array<{ name: string; description: string; parameters?: Record<string, any> }> {
-    return this.listTools();
+    return Array.from(this.tools.values()).map((t) => {
+      let params = t.parameters;
+      if (!params || !params.type) {
+        params = {
+          type: 'OBJECT',
+          properties: {},
+        };
+      } else {
+        params = this.normalizeSchema(params);
+      }
+      return {
+        name: t.name,
+        description: t.description,
+        parameters: params,
+      };
+    });
   }
 
   public async execute(name: string, params: Record<string, any>): Promise<any> {
@@ -1916,19 +2944,34 @@ export class ToolRegistry {
     try {
       const output = await tool.execute(params);
       const durationSec = (Date.now() - startTime) / 1000;
+      const resString =
+        typeof output === 'string'
+          ? output
+          : output?.result !== undefined
+          ? output.result
+          : typeof output === 'object'
+          ? JSON.stringify(output)
+          : String(output);
+      const isSuccess = output && typeof output === 'object' && output.success !== undefined ? Boolean(output.success) : true;
       return {
+        success: isSuccess,
+        result: resString,
+        data: output?.data !== undefined ? output.data : typeof output === 'object' ? output : { value: output },
         toolName: name,
         executionTimeSec: Number(durationSec.toFixed(2)),
-        status: 'success',
+        status: isSuccess ? 'success' : 'error',
         output,
+        ...(output && typeof output === 'object' && output._screenshotForVision ? { _screenshotForVision: output._screenshotForVision } : {}),
       };
     } catch (err: any) {
       const durationSec = (Date.now() - startTime) / 1000;
       return {
+        success: false,
+        error: err.message,
+        result: `Error executing ${name}: ${err.message}`,
         toolName: name,
         executionTimeSec: Number(durationSec.toFixed(2)),
         status: 'error',
-        error: err.message,
       };
     }
   }

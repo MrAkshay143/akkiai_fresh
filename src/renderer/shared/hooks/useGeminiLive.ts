@@ -235,16 +235,69 @@ export function useGeminiLive() {
         settings.selectedVoice ||
         'Charon';
 
+      // Load System Paths into window.__akkiSystemPaths if not present
+      try {
+        const _sp = await (window as any).electronAPI?.invoke?.('get-system-paths');
+        if (_sp) (window as any).__akkiSystemPaths = _sp;
+      } catch (_) {}
+
+      // Read Bootstrap files (SOUL.md and MEMORY.md with dynamic directives)
+      let bootstrapMemory = '';
+      let bootstrapSoul = '';
+      try {
+        const boot = await (window as any).electronAPI?.invoke?.('read-bootstrap-files');
+        if (boot) {
+          bootstrapMemory = boot.memory || '';
+          bootstrapSoul = boot.soul || '';
+        }
+      } catch (_) {}
+
+      // Load enabled skills for context
+      let enabledSkillsBlock = '';
+      try {
+        const skillsRes = await (window as any).electronAPI?.invoke?.('skills-get-all');
+        const skillsList = skillsRes?.skills || (Array.isArray(skillsRes) ? skillsRes : []);
+        const activeSkills = skillsList.filter((s: any) => s.enabled);
+        if (activeSkills.length > 0) {
+          enabledSkillsBlock =
+            '\n\n## SKILLS (ACTIVE EXTENSIONS)\n' +
+            activeSkills.map((s: any) => `### Skill: ${s.name}\n${s.description || ''}`).join('\n\n');
+        }
+      } catch (_) {}
+
       // Cultural System Instruction with Tool Trigger Rules
       const userName = (settings.userName || 'Akshay').trim();
-      const soulPrompt =
+      const activeSoulPrompt =
+        bootstrapSoul.trim() ||
         settings.customSystemPrompt ||
         'You are Akki AI, a warm, highly intelligent, and loyal personal desktop AI companion pairing with Akshay. Respond warmly, concisely, and naturally in Hinglish/Hindi or English as preferred by the user.';
 
-      const fullSystemInstruction = `${soulPrompt}
-User Profile: Name: ${userName}. You speak naturally in live conversational voice. Keep responses concise, warm, and engaging.
+      const userLocation =
+        localStorage.getItem('akki_live_location') ||
+        localStorage.getItem('akki_detected_location') ||
+        (settings as any).userLocation ||
+        '';
 
-${TOOL_TRIGGER_RULES}`;
+      const locationContext = userLocation.trim()
+        ? `\n\n[USER_CURRENT_LOCATION_CONTEXT]\nUser's live physical location: "${userLocation.trim()}".\nCRITICAL INSTRUCTION: Whenever the user asks any question about weather, time, news, local events, nearby places, food, stores, directions, or geographic context in any language (Bengali, Hindi, English, Hinglish), ALWAYS assume and prioritize this current location. Never ask the user for their city or location—answer with priority for this location immediately.`
+        : `\n\n[USER_CURRENT_LOCATION_CONTEXT]\nWhen the user asks location-dependent questions (weather, nearby places, time, local news), prioritize the user's real location. Call the get_user_location tool to retrieve their real-time location.`;
+
+      const neuralPlayerRules = `
+[AKKI_NEURAL_PLAYER_RULES]
+1. Window control: When the user asks in Bengali, Hindi, or English to minimize, maximize, restore, fullscreen, or close the player window (e.g. 'player minimize kore dao', 'full screen koro', 'maximize koro', 'player ta restore koro', 'player bondho koro', 'close player'), call control_media_player with action: 'minimize', 'maximize', 'restore', 'fullscreen', or 'close'.
+2. Forward / Rewind: When user asks to forward/advance ('10 second aage koro', 'forward koro', 'skip ahead'), call control_media_player with action: 'forward' and value: '10' (or requested seconds). For rewind/backward ('10 second pichhe koro', 'rewind koro', 'piche jao'), call action: 'rewind' and value: '10' (or requested seconds).
+3. Exact timestamp seek: When user asks to play at a specific minute/second (e.g. 'video ta 2 minute 15 second e chalao', '1 minute 30 second theke chalao', 'seek to 45 seconds'), parse time to total seconds (e.g. 2m 15s = 135) and call control_media_player with action: 'seek' and value: '135'.
+4. Dedicated Player Volume: When user asks to change player volume, song volume, or player sound (e.g. 'player volume 50 percent koro', 'player er sound 70 koro', 'player er awaj barhao', 'player volume komao', 'player mute koro', 'player unmute koro', 'gaan er sound barhao/komao'), call control_media_player with action: 'set_player_volume' (with value 0-100), 'player_volume_up', 'player_volume_down', 'mute_player', or 'unmute_player'. CRITICAL: This is dedicated player volume for music/videos. Do NOT touch Windows OS system master volume tools for player volume requests.`;
+
+      const fullSystemInstruction = `${activeSoulPrompt}
+
+User Profile: Name: ${userName}. You speak naturally in live conversational voice. Keep responses concise, warm, and engaging.
+${locationContext}
+${neuralPlayerRules}
+
+${TOOL_TRIGGER_RULES}
+${enabledSkillsBlock}
+${bootstrapMemory ? `\n\n## LONG-TERM MEMORY & SYSTEM DIRECTIVES\n${bootstrapMemory}` : ''}`;
 
       // Load tool declarations so Gemini Live can execute tools
       let toolsConfig: any[] = [];
