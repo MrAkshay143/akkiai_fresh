@@ -409,9 +409,92 @@ export class GeminiService {
     };
   }
 
-  // ───────────────────────────────────────────────────────────────────────────
-  // GEMINI API STREAMING VIA @google/genai
-  // ───────────────────────────────────────────────────────────────────────────
+  /**
+   * Constructs and sanitizes contents array for Google Gemini API:
+   * 1. Preserves prior conversation history (user & model turns).
+   * 2. Guarantees the user prompt is present as the final turn.
+   * 3. Drops empty text parts and trims whitespace.
+   * 4. Ensures first turn is role 'user' (Gemini API requirement).
+   * 5. Strips any trailing model turns (prevents 400: Requests ending with a model turn are not supported).
+   * 6. Strictly alternates roles (user -> model -> user -> model -> user) by merging consecutive same-role turns.
+   * 7. Guarantees non-empty contents ending in a user turn.
+   */
+  private buildGeminiContents(options: GenerateStreamOptions): any[] {
+    const rawTurns: Array<{ role: 'user' | 'model'; parts: any[] }> = [];
+
+    // 1. Ingest existing messages if present
+    if (options.messages && options.messages.length > 0) {
+      for (const msg of options.messages) {
+        const text = (msg.content || '').trim();
+        if (text) {
+          rawTurns.push({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text }],
+          });
+        }
+      }
+    }
+
+    // 2. Ingest user prompt if provided and not already the final user turn
+    if (options.prompt && options.prompt.trim()) {
+      const promptText = options.prompt.trim();
+      const lastTurn = rawTurns[rawTurns.length - 1];
+      const lastText = lastTurn?.parts?.[0]?.text;
+      if (!lastTurn || lastTurn.role !== 'user' || lastText !== promptText) {
+        rawTurns.push({
+          role: 'user',
+          parts: [{ text: promptText }],
+        });
+      }
+    }
+
+    // 3. Fallback if completely empty
+    if (rawTurns.length === 0) {
+      rawTurns.push({
+        role: 'user',
+        parts: [{ text: options.prompt?.trim() || 'Hello' }],
+      });
+    }
+
+    // 4. Gemini requirement: Conversation must start with a user turn
+    if (rawTurns[0].role === 'model') {
+      rawTurns.unshift({
+        role: 'user',
+        parts: [{ text: 'Hello' }],
+      });
+    }
+
+    // 5. Gemini strict requirement: Conversation must NEVER end with a model turn
+    while (rawTurns.length > 0 && rawTurns[rawTurns.length - 1].role === 'model') {
+      rawTurns.pop();
+    }
+
+    // 6. If popping trailing model turns emptied the list or left it without user turn
+    if (rawTurns.length === 0 || rawTurns[rawTurns.length - 1].role !== 'user') {
+      rawTurns.push({
+        role: 'user',
+        parts: [{ text: options.prompt?.trim() || 'Hello' }],
+      });
+    }
+
+    // 7. Strictly alternate roles: merge consecutive turns with the same role
+    const alternatingContents: any[] = [];
+    for (const turn of rawTurns) {
+      if (alternatingContents.length > 0 && alternatingContents[alternatingContents.length - 1].role === turn.role) {
+        const lastTurn = alternatingContents[alternatingContents.length - 1];
+        const existingText = lastTurn.parts[0]?.text || '';
+        const newText = turn.parts[0]?.text || '';
+        lastTurn.parts[0] = { text: existingText ? `${existingText}\n\n${newText}` : newText };
+      } else {
+        alternatingContents.push({
+          role: turn.role,
+          parts: [{ text: turn.parts[0]?.text || '' }],
+        });
+      }
+    }
+
+    return alternatingContents;
+  }
 
   private async streamFromGemini(
     options: GenerateStreamOptions,
@@ -421,23 +504,8 @@ export class GeminiService {
     let modelName = resolveActiveModel(options.model || this.config.primaryModel, DEFAULT_MODELS.primary);
     const ai = new GoogleGenAI({ apiKey });
 
-    // Prepare contents
-    const contents: any[] = [];
-    if (options.messages && options.messages.length > 0) {
-      for (const msg of options.messages) {
-        contents.push({
-          role: msg.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: msg.content }],
-        });
-      }
-    } else if (options.prompt) {
-      contents.push({
-        role: 'user',
-        parts: [{ text: options.prompt }],
-      });
-    } else {
-      throw new Error('No prompt or messages provided to Gemini');
-    }
+    // Prepare contents with turn sanitization & alternation guarantees
+    const contents: any[] = this.buildGeminiContents(options);
 
     // Prepare system instruction
     const systemInstruction = options.systemInstruction || this.config.systemInstruction;
@@ -725,10 +793,21 @@ export class GeminiService {
 
     if (options.messages && options.messages.length > 0) {
       for (const m of options.messages) {
-        messages.push({ role: m.role, content: m.content });
+        const text = (m.content || '').trim();
+        if (text) {
+          messages.push({ role: m.role, content: text });
+        }
       }
-    } else if (options.prompt) {
-      messages.push({ role: 'user', content: options.prompt });
+    }
+    if (options.prompt && options.prompt.trim()) {
+      const p = options.prompt.trim();
+      const last = messages[messages.length - 1];
+      if (!last || last.role !== 'user' || last.content !== p) {
+        messages.push({ role: 'user', content: p });
+      }
+    }
+    if (messages.length === 0 || (messages.length === 1 && messages[0].role === 'system')) {
+      messages.push({ role: 'user', content: options.prompt?.trim() || 'Hello' });
     }
 
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -836,10 +915,21 @@ export class GeminiService {
 
       if (options.messages && options.messages.length > 0) {
         for (const m of options.messages) {
-          messages.push({ role: m.role, content: m.content });
+          const text = (m.content || '').trim();
+          if (text) {
+            messages.push({ role: m.role, content: text });
+          }
         }
-      } else if (options.prompt) {
-        messages.push({ role: 'user', content: options.prompt });
+      }
+      if (options.prompt && options.prompt.trim()) {
+        const p = options.prompt.trim();
+        const last = messages[messages.length - 1];
+        if (!last || last.role !== 'user' || last.content !== p) {
+          messages.push({ role: 'user', content: p });
+        }
+      }
+      if (messages.length === 0 || (messages.length === 1 && messages[0].role === 'system')) {
+        messages.push({ role: 'user', content: options.prompt?.trim() || 'Hello' });
       }
 
       const requestBody: Record<string, unknown> = {

@@ -118,18 +118,46 @@ export class AIService {
     });
 
     // Convert ChatMessage[] or messages to history format
-    const messages = payload.messages && payload.messages.length > 0
-      ? payload.messages
-      : (payload.history || []).map((m) => ({
-          role: (m.sender === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
-          content: m.content,
-        }));
+    const rawMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    if (payload.messages && payload.messages.length > 0) {
+      for (const m of payload.messages) {
+        const text = (m.content || '').trim();
+        if (text) {
+          rawMessages.push({
+            role: m.role === 'assistant' ? 'assistant' : 'user',
+            content: text,
+          });
+        }
+      }
+    } else if (payload.history && payload.history.length > 0) {
+      for (const m of payload.history) {
+        const text = (m.content || '').trim();
+        if (text) {
+          rawMessages.push({
+            role: (m.sender === 'assistant' ? 'assistant' : 'user') as 'user' | 'assistant',
+            content: text,
+          });
+        }
+      }
+    }
+
+    // Always ensure current prompt is included as final user turn
+    if (payload.prompt && payload.prompt.trim()) {
+      const promptText = payload.prompt.trim();
+      const lastMsg = rawMessages[rawMessages.length - 1];
+      if (!lastMsg || lastMsg.role !== 'user' || lastMsg.content !== promptText) {
+        rawMessages.push({
+          role: 'user',
+          content: promptText,
+        });
+      }
+    }
 
     const activeRegistry = payload.toolRegistry || this.toolRegistry;
 
     return await this.geminiService.generateStream({
       prompt: payload.prompt,
-      messages,
+      messages: rawMessages,
       model,
       provider,
       systemInstruction: fullSystemInstruction,
